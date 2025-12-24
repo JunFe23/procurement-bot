@@ -30,7 +30,6 @@ try:
     driver.get("https://www.google.com")
     print("구글 접속 성공! 5초 뒤에 종료됩니다.")
     
-    # 여기에 나중에 조달청 로그인/다운로드 로직을 넣으면 됩니다.
     
     time.sleep(5) 
 
