@@ -28,9 +28,57 @@
 
 ## ⚙️ 실행 방법 (Usage)
 
-### 1. 환경 설정
+### 로컬 환경 (macOS/Windows)
+
+#### 1. 환경 설정
 
 ```bash
 # 필수 라이브러리 설치
 pip install -r requirements.txt
 ```
+
+#### 2. 실행
+
+```bash
+python main.py
+```
+
+---
+
+### ☁️ EC2에서 실행하기
+
+#### 빠른 설정 (자동 스크립트)
+
+```bash
+# EC2 인스턴스에 접속 후
+chmod +x setup-ec2.sh
+./setup-ec2.sh
+```
+
+#### 수동 설정
+
+자세한 가이드는 [`setup-ec2.md`](setup-ec2.md) 파일을 참고하세요.
+
+**주요 단계:**
+1. Ubuntu 22.04 LTS 인스턴스 생성
+2. Chrome 및 ChromeDriver 설치
+3. MySQL 설치 및 데이터베이스 생성
+4. 프로젝트 파일 업로드
+5. Python 가상환경 설정 및 패키지 설치
+6. 스크립트 실행
+
+**EC2에서 자동 실행 (Cron):**
+```bash
+crontab -e
+# 매일 새벽 2시 실행 예시
+0 2 * * * cd /home/ubuntu/procurement-bot && /home/ubuntu/procurement-bot/venv/bin/python main.py >> /home/ubuntu/procurement-bot/logs/cron.log 2>&1
+```
+
+---
+
+## 📝 주요 변경사항 (EC2 지원)
+
+- ✅ Headless 모드 자동 활성화
+- ✅ EC2/Linux 환경을 위한 Chrome 옵션 추가
+- ✅ 자동 설치 스크립트 제공 (`setup-ec2.sh`)
+- ✅ 상세한 EC2 설정 가이드 제공 (`setup-ec2.md`)

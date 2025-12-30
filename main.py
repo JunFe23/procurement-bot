@@ -40,7 +40,14 @@ if not os.path.exists(DOWNLOAD_DIR):
 options = Options()
 prefs = {"download.default_directory": DOWNLOAD_DIR}
 options.add_experimental_option("prefs", prefs)
-# options.add_argument("--headless") 
+
+# EC2/Linux 환경을 위한 옵션
+options.add_argument("--headless")  # GUI 없이 실행
+options.add_argument("--no-sandbox")  # EC2에서 필수
+options.add_argument("--disable-dev-shm-usage")  # 메모리 부족 방지
+options.add_argument("--disable-gpu")  # GPU 비활성화
+options.add_argument("--window-size=1920,1080")  # 창 크기 설정
+options.add_argument("--disable-blink-features=AutomationControlled")  # 봇 감지 방지 
 
 print("🚀 브라우저를 실행합니다...")
 service = Service(ChromeDriverManager().install())
