@@ -60,6 +60,7 @@ chmod +x setup-ec2.sh
 자세한 가이드는 [`setup-ec2.md`](setup-ec2.md) 파일을 참고하세요.
 
 **주요 단계:**
+
 1. Ubuntu 22.04 LTS 인스턴스 생성
 2. Chrome 및 ChromeDriver 설치
 3. MySQL 설치 및 데이터베이스 생성
@@ -68,6 +69,7 @@ chmod +x setup-ec2.sh
 6. 스크립트 실행
 
 **EC2에서 자동 실행 (Cron):**
+
 ```bash
 crontab -e
 # 매일 새벽 2시 실행 예시
@@ -78,7 +80,8 @@ crontab -e
 
 ## 📝 주요 변경사항 (EC2 지원)
 
-- ✅ Headless 모드 자동 활성화
-- ✅ EC2/Linux 환경을 위한 Chrome 옵션 추가
-- ✅ 자동 설치 스크립트 제공 (`setup-ec2.sh`)
-- ✅ 상세한 EC2 설정 가이드 제공 (`setup-ec2.md`)
+-   ✅ Headless 모드 자동 활성화
+-   ✅ EC2/Linux 환경을 위한 Chrome 옵션 추가
+-   ✅ 자동 설치 스크립트 제공 (`setup-ec2.sh`)
+-   ✅ 상세한 EC2 설정 가이드 제공 (`setup-ec2.md`)
+    ec2 테스트 진행예정
