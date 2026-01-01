@@ -57,7 +57,7 @@ wait = WebDriverWait(driver, 20)
 def js_click(element):
     driver.execute_script("arguments[0].click();", element)
 
-# 스마트 다운로드 대기 함수
+# 다운로드 대기 함수
 def wait_for_download_complete(dir_path, timeout=300):
     print(f"⏳ 다운로드 완료 감시 시작 (최대 {timeout}초 대기)...")
     start_time = time.time()
