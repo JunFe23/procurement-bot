@@ -17,9 +17,6 @@ from sqlalchemy import create_engine
 # [설정] 환경 및 DB 설정
 # ==========================================
 HOME_URL = "https://data.g2b.go.kr/"
-
-# [DB 설정] 비밀번호 없이 root 계정 사용, DB명은 'g2b'
-# 형식: mysql+pymysql://아이디:비번@주소:포트/DB명
 DB_CONNECTION_STR = "mysql+pymysql://root:@localhost:3306/g2b"
 TABLE_NAME = "procurement_table"
 
@@ -32,24 +29,32 @@ DOWNLOAD_DIR = os.path.join(BASE_DIR, "downloads")
 if not os.path.exists(DOWNLOAD_DIR):
     os.makedirs(DOWNLOAD_DIR)
 
-# [옵션] 기존 파일 삭제 (테스트할 때 켜두면 깔끔합니다)
-# for f in glob.glob(os.path.join(DOWNLOAD_DIR, "*")):
-#     try: os.remove(f)
-#     except: pass
-
+# [옵션] EC2/Headless 환경 맞춤 설정 (팝업 허용 강화)
 options = Options()
-prefs = {"download.default_directory": DOWNLOAD_DIR}
+
+# 1. 팝업 및 다운로드 관련 강력한 허용 설정
+prefs = {
+    "download.default_directory": DOWNLOAD_DIR,
+    "download.prompt_for_download": False,
+    "download.directory_upgrade": True,
+    "safebrowsing.enabled": True,
+    "profile.default_content_settings.popups": 0,  # 팝업 차단 해제 (0: 허용)
+    "profile.default_content_setting_values.automatic_downloads": 1, # 자동 다운로드 허용
+    "profile.content_settings.exceptions.automatic_downloads.*.setting": 1
+}
 options.add_experimental_option("prefs", prefs)
 
-# EC2/Linux 환경을 위한 옵션
-options.add_argument("--headless")  # GUI 없이 실행
-options.add_argument("--no-sandbox")  # EC2에서 필수
-options.add_argument("--disable-dev-shm-usage")  # 메모리 부족 방지
-options.add_argument("--disable-gpu")  # GPU 비활성화
-options.add_argument("--window-size=1920,1080")  # 창 크기 설정
-options.add_argument("--disable-blink-features=AutomationControlled")  # 봇 감지 방지 
+# 2. Headless 및 User-Agent 설정
+options.add_argument("--headless")  
+options.add_argument("--no-sandbox") 
+options.add_argument("--disable-dev-shm-usage")
+options.add_argument("--window-size=1920,1080")
+options.add_argument("--disable-gpu")
+# [중요] 사람인 척 속이기 (User-Agent 설정)
+options.add_argument("user-agent=Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
+options.add_argument("--disable-blink-features=AutomationControlled") 
 
-print("🚀 브라우저를 실행합니다...")
+print("🚀 Headless 브라우저를 실행합니다... (팝업 허용 모드)")
 service = Service(ChromeDriverManager().install())
 driver = webdriver.Chrome(service=service, options=options)
 wait = WebDriverWait(driver, 20) 
@@ -57,15 +62,18 @@ wait = WebDriverWait(driver, 20)
 def js_click(element):
     driver.execute_script("arguments[0].click();", element)
 
-# 다운로드 대기 함수
+# [디버깅용] 스크린샷 함수
+def save_screenshot(filename):
+    path = os.path.join(BASE_DIR, filename)
+    driver.save_screenshot(path)
+    print(f"📸 화면 저장: {filename}")
+
 def wait_for_download_complete(dir_path, timeout=300):
     print(f"⏳ 다운로드 완료 감시 시작 (최대 {timeout}초 대기)...")
     start_time = time.time()
-    
     while time.time() - start_time < timeout:
         files = glob.glob(os.path.join(dir_path, "*"))
         temp_files = [f for f in files if f.endswith('.crdownload') or f.endswith('.tmp')]
-        
         if files and not temp_files:
             latest_file = max(files, key=os.path.getctime)
             if os.path.getsize(latest_file) > 0:
@@ -74,9 +82,7 @@ def wait_for_download_complete(dir_path, timeout=300):
     return None
 
 try:
-    # ==========================================
-    # [Step 1~4] 웹 자동화 (기존과 동일)
-    # ==========================================
+    # Step 1
     driver.get(HOME_URL)
     print("🏠 메인 페이지 접속 완료. (10초 대기)")
     time.sleep(10)
@@ -122,25 +128,39 @@ try:
     
     print("⏳ 조회 중... (10초 대기)")
     time.sleep(10) 
+    save_screenshot("step3_search_complete.png")
 
     print("🔍 CSV 다운로드 버튼 클릭...")
     csv_down_btn = wait.until(EC.presence_of_element_located((By.ID, "mf_popupCnts_btnCsvDown")))
+    
+    # [중요] 팝업 뜨기 전 핸들 저장
     handles_before_popup = driver.window_handles
+    
+    # 버튼이 화면에 확실히 보이도록 스크롤 (Headless 안전장치)
+    driver.execute_script("arguments[0].scrollIntoView(true);", csv_down_btn)
+    time.sleep(1)
     js_click(csv_down_btn)
+    print("🖱️ CSV 버튼 클릭함! 팝업 대기중...")
 
-    print("⏳ 팝업창 대기...")
+    # [수정] 팝업 감지 로직 강화
     popup_window = None
-    for i in range(10):
+    for i in range(15): # 대기 시간 15초로 연장
         current_handles = driver.window_handles
         new_popups = [h for h in current_handles if h not in handles_before_popup]
         if new_popups:
             popup_window = new_popups[0]
+            print(f"✨ 팝업 발견! (시도 {i+1}회)")
             break
         time.sleep(1)
         
-    if not popup_window: raise Exception("팝업창 미발견")
+    if not popup_window:
+        # 실패 시 현재 화면 저장
+        save_screenshot("error_no_popup.png")
+        raise Exception("팝업창 미발견")
+        
     driver.switch_to.window(popup_window)
     time.sleep(3) 
+    save_screenshot("step4_popup_opened.png")
 
     print("⬇️ 내보내기 버튼 클릭...")
     export_btn = None
@@ -151,19 +171,19 @@ try:
         js_click(export_btn)
         time.sleep(5)
     else:
+        save_screenshot("error_no_export_btn.png")
         raise Exception("내보내기 버튼 없음")
 
     downloaded_file = wait_for_download_complete(DOWNLOAD_DIR, timeout=300)
 
     # ==========================================
-    # [Step 5] DB 저장 (한글 컬럼 그대로 저장)
+    # [Step 5] DB 저장
     # ==========================================
     if downloaded_file:
         print(f"✅ 다운로드 완료: {downloaded_file}")
         
-        print("📖 데이터 파일 읽는 중 (상단 28줄 스킵)...")
+        print("📖 데이터 파일 읽는 중...")
         try:
-            # 1. 파일 읽기 (UTF-16, Tab 구분, 28줄 스킵, 쉼표 제거)
             df = pd.read_csv(
                 downloaded_file, 
                 encoding='utf-16', 
@@ -173,28 +193,25 @@ try:
                 thousands=','
             )
             print(f"📋 데이터 로드 성공: 총 {len(df)}건")
-            print(df.head()) # 데이터 미리보기
             
-            # 2. DB 저장
             print(f"💾 g2b 데이터베이스에 저장 시작...")
             engine = create_engine(DB_CONNECTION_STR)
             conn = engine.connect()
             
-            # chunksize=1000: 데이터를 1000개씩 끊어서 저장 (안정성 확보)
             df.to_sql(name=TABLE_NAME, con=engine, if_exists='replace', index=False, chunksize=1000)
             
-            print(f"🎉 대성공! {len(df)}건의 데이터를 'procurement_table'에 모두 저장했습니다!")
+            print(f"🎉 대성공! {len(df)}건 저장 완료!")
             conn.close()
             
         except Exception as e:
             print(f"❌ 데이터 처리 실패: {e}")
-            print("👉 MySQL 서버가 켜져 있는지 확인해주세요!")
 
     else:
         print("❌ 타임아웃: 파일이 다운로드되지 않았습니다.")
 
 except Exception as e:
     print(f"❌ 에러 발생: {e}")
+    save_screenshot("final_error.png")
 
 finally:
     print("👋 작업 완료. 5초 후 종료합니다.")

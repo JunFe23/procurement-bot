@@ -7,3 +7,9 @@ downloads/
 .env
 .idea/
 .vscode/
+
+# 디버깅용 스크린샷 이미지 무시
+*.png
+
+# 수집된 데이터 폴더 무시
+downloads/
