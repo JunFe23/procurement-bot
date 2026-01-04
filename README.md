@@ -84,4 +84,4 @@ crontab -e
 -   ✅ EC2/Linux 환경을 위한 Chrome 옵션 추가
 -   ✅ 자동 설치 스크립트 제공 (`setup-ec2.sh`)
 -   ✅ 상세한 EC2 설정 가이드 제공 (`setup-ec2.md`)
-    ec2 테스트 진행예정
+    ec2 테스트 진행완료
