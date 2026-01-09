@@ -1,81 +1,120 @@
 import pandas as pd
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, text
 import os
 import time
+import glob
+import shutil  # 파일을 이동시키기 위한 도구
 
 # =========================================================
-# [설정] 파일 경로와 DB 정보만 수정하세요
+# [설정]
 # =========================================================
-# 1. 수동으로 넣을 CSV 파일 경로 (절대 경로 추천)
-TARGET_FILE = "/Users/junfe/Desktop/G2B/procurement-bot/downloads/2017년_물품계약.csv" 
+# 1. 경로 설정
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+DOWNLOAD_DIR = os.path.join(BASE_DIR, "downloads")     # 작업할 파일이 있는 곳
+COMPLETED_DIR = os.path.join(BASE_DIR, "completed")    # 처리가 끝난 파일을 옮겨둘 곳
 
-# 2. DB 접속 정보 (비밀번호 없으면 root:@localhost)
+# 2. DB 접속 정보
 DB_CONNECTION_STR = "mysql+pymysql://root:@localhost:3306/g2b"
 TABLE_NAME = "procurement_table"
 
-# 3. 조달청 파일 포맷 설정 (2017년도 동일하다고 가정)
-ENCODING = 'utf-16' # 안 되면 'cp949' 또는 'euc-kr' 시도
-SEPARATOR = '\t'    # 탭 구분
-SKIP_ROWS = 28      # 상단 불필요한 행 개수
-CHUNK_SIZE = 10000  # 한 번에 처리할 행 개수 (메모리 보호용)
-
+# 3. 조달청 CSV 포맷 설정
+ENCODING = 'utf-16' 
+SEPARATOR = '\t'    
+SKIP_ROWS = 28      
+CHUNK_SIZE = 10000 
 # =========================================================
 
-def upload_large_csv():
-    if not os.path.exists(TARGET_FILE):
-        print(f"❌ 파일을 찾을 수 없습니다: {TARGET_FILE}")
+def upload_and_archive_files():
+    # 0. 완료 폴더가 없으면 생성
+    if not os.path.exists(COMPLETED_DIR):
+        os.makedirs(COMPLETED_DIR)
+        print(f"📁 '{COMPLETED_DIR}' 폴더를 생성했습니다.")
+
+    # 1. 다운로드 폴더의 모든 CSV 파일 탐색
+    files = glob.glob(os.path.join(DOWNLOAD_DIR, "*.csv"))
+    files.sort() # 연도순(이름순) 처리
+
+    if not files:
+        print(f"📭 '{DOWNLOAD_DIR}' 폴더에 처리할 CSV 파일이 없습니다.")
         return
 
-    print(f"🚀 대용량 CSV 적재 시작: {TARGET_FILE}")
-    print(f"💾 대상 테이블: {TABLE_NAME}")
+    print(f"🚀 총 {len(files)}개의 신규 파일을 발견했습니다.")
+    print(f"   (처리 완료된 파일은 '{COMPLETED_DIR}'로 자동 이동됩니다)")
     
     engine = create_engine(DB_CONNECTION_STR)
     conn = engine.connect()
 
-    total_rows = 0
-    start_time = time.time()
-
+    # [안전장치] DB 컬럼 타입 변경 (VARCHAR로 확보)
     try:
-        # chunksize 옵션을 쓰면 파일 전체를 읽지 않고 조금씩 읽어옵니다.
-        chunk_iterator = pd.read_csv(
-            TARGET_FILE,
-            encoding=ENCODING,
-            sep=SEPARATOR,
-            skiprows=SKIP_ROWS,
-            low_memory=False,
-            thousands=',',
-            chunksize=CHUNK_SIZE # 핵심!
-        )
+        conn.execute(text(f"ALTER TABLE {TABLE_NAME} MODIFY COLUMN 업체사업자등록번호 VARCHAR(50)"))
+        conn.execute(text(f"ALTER TABLE {TABLE_NAME} MODIFY COLUMN 입찰공고번호 VARCHAR(50)"))
+    except:
+        pass # 이미 되어있으면 패스
 
-        for i, df_chunk in enumerate(chunk_iterator):
-            # 데이터가 비어있으면 패스
-            if df_chunk.empty:
-                continue
-
-            # DB에 추가 (append)
-            df_chunk.to_sql(
-                name=TABLE_NAME,
-                con=engine,
-                if_exists='append', # 기존 데이터 뒤에 붙이기
-                index=False
+    # 2. 파일 반복 처리
+    for idx, file_path in enumerate(files):
+        file_name = os.path.basename(file_path)
+        print(f"\n==================================================")
+        print(f"[{idx+1}/{len(files)}] 처리 시작: {file_name}")
+        print(f"==================================================")
+        
+        start_time = time.time()
+        file_rows = 0
+        is_success = False # 성공 여부 플래그
+        
+        try:
+            # [핵심] dtype 설정으로 데이터 타입 에러 방지
+            chunk_iterator = pd.read_csv(
+                file_path,
+                encoding=ENCODING,
+                sep=SEPARATOR,
+                skiprows=SKIP_ROWS,
+                low_memory=False,
+                thousands=',',
+                chunksize=CHUNK_SIZE,
+                dtype={
+                    '업체사업자등록번호': str, # F가 섞인 번호 처리
+                    '입찰공고번호': str,     # 2017-01 형태 처리
+                    '계약번호': str,
+                    '수요기관코드': str,
+                    '물품분류번호': str,
+                    '세부품명번호': str,
+                    '물품식별번호': str,
+                    '참조번호': str
+                }
             )
+
+            for chunk in chunk_iterator:
+                if chunk.empty: continue
+                
+                # DB에 데이터 추가 (append)
+                chunk.to_sql(name=TABLE_NAME, con=engine, if_exists='append', index=False)
+                file_rows += len(chunk)
+                print(f"   ↳ {len(chunk)}건 저장... (누적 {file_rows}건)")
             
-            rows = len(df_chunk)
-            total_rows += rows
-            print(f"✅ Chunk {i+1} 완료: {rows}건 저장 (누적 {total_rows}건)")
+            duration = time.time() - start_time
+            print(f"✅ DB 적재 완료 ({duration:.1f}초, {file_rows}건)")
+            is_success = True
 
-        duration = time.time() - start_time
-        print(f"\n🎉 모든 작업 완료!")
-        print(f"총 소요 시간: {duration:.2f}초")
-        print(f"총 저장된 데이터: {total_rows}건")
+        except Exception as e:
+            print(f"❌ 처리 실패: {e}")
+            is_success = False
 
-    except Exception as e:
-        print(f"\n❌ 에러 발생: {e}")
-        print("팁: 인코딩 문제라면 encoding 옵션을 'cp949'로 바꿔보세요.")
-        print("팁: 데이터가 29번째 줄부터 시작하지 않는다면 skiprows 숫자를 조절하세요.")
+        # 3. 성공 시 파일 이동 (Archive)
+        if is_success:
+            try:
+                destination = os.path.join(COMPLETED_DIR, file_name)
+                # 혹시 완료 폴더에 이미 같은 이름이 있으면 덮어쓰기 위해 삭제 후 이동
+                if os.path.exists(destination):
+                    os.remove(destination)
+                
+                shutil.move(file_path, destination)
+                print(f"📦 파일 이동 완료: downloads -> completed/{file_name}")
+            except Exception as move_error:
+                print(f"⚠️ DB 저장은 성공했으나 파일 이동 실패: {move_error}")
 
-    finally:
-        conn.close()
+    conn.close()
+    print("\n🎉 모든 작업 종료!")
 
 if __name__ == "__main__":
-    upload_large_csv()
+    upload_and_archive_files()
