@@ -39,17 +39,13 @@ def upload_and_archive_files():
         return
 
     print(f"🚀 총 {len(files)}개의 신규 파일을 발견했습니다.")
-    print(f"   (처리 완료된 파일은 '{COMPLETED_DIR}'로 자동 이동됩니다)")
+    print(f"   (처리 완료된 파일은 '{COMPLETED_DIR}'로 자동 이동됩니다)\n")
     
-    engine = create_engine(DB_CONNECTION_STR)
-    conn = engine.connect()
-
-    # [안전장치] DB 컬럼 타입 변경 (VARCHAR로 확보)
-    try:
-        conn.execute(text(f"ALTER TABLE {TABLE_NAME} MODIFY COLUMN 업체사업자등록번호 VARCHAR(50)"))
-        conn.execute(text(f"ALTER TABLE {TABLE_NAME} MODIFY COLUMN 입찰공고번호 VARCHAR(50)"))
-    except:
-        pass # 이미 되어있으면 패스
+    # [DB 연결 설정] AUTOCOMMIT 모드로 설정하여 데이터 입력 즉시 반영
+    engine = create_engine(
+        DB_CONNECTION_STR,
+        execution_options={"isolation_level": "AUTOCOMMIT"}
+    )
 
     # 2. 파일 반복 처리
     for idx, file_path in enumerate(files):
@@ -80,17 +76,28 @@ def upload_and_archive_files():
                     '물품분류번호': str,
                     '세부품명번호': str,
                     '물품식별번호': str,
-                    '참조번호': str
+                    '참조번호': str,
+                    '공공조달분류번호': str  # 공공조달분류번호도 문자열로 처리
                 }
             )
 
             for chunk in chunk_iterator:
                 if chunk.empty: continue
                 
-                # DB에 데이터 추가 (append)
-                chunk.to_sql(name=TABLE_NAME, con=engine, if_exists='append', index=False)
-                file_rows += len(chunk)
-                print(f"   ↳ {len(chunk)}건 저장... (누적 {file_rows}건)")
+                # DB에 데이터 추가 (append) - method="multi"로 속도 향상
+                try:
+                    chunk.to_sql(
+                        name=TABLE_NAME, 
+                        con=engine, 
+                        if_exists='append', 
+                        index=False,
+                        method='multi'  # 대량 삽입 최적화
+                    )
+                    file_rows += len(chunk)
+                    print(f"   ↳ {len(chunk)}건 저장... (누적 {file_rows}건)")
+                except Exception as chunk_error:
+                    print(f"   ⚠️ 배치 저장 실패 (스킵): {chunk_error}")
+                    continue  # 실패한 배치는 건너뛰고 다음으로
             
             duration = time.time() - start_time
             print(f"✅ DB 적재 완료 ({duration:.1f}초, {file_rows}건)")
@@ -113,7 +120,7 @@ def upload_and_archive_files():
             except Exception as move_error:
                 print(f"⚠️ DB 저장은 성공했으나 파일 이동 실패: {move_error}")
 
-    conn.close()
+    # Engine은 자동으로 정리되므로 명시적인 close 불필요
     print("\n🎉 모든 작업 종료!")
 
 if __name__ == "__main__":
