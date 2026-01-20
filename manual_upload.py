@@ -236,7 +236,37 @@ def format_error_message(error: object, max_len: int = 2000) -> str:
     return f"{head} ... [truncated]"
 
 
-def normalize_dataframe(df: pd.DataFrame, dedupe_in_file: bool) -> pd.DataFrame:
+def fetch_column_max_lengths(engine, table_name: str) -> Dict[str, int]:
+    query = text(
+        """
+        SELECT column_name, character_maximum_length
+        FROM information_schema.columns
+        WHERE table_schema = DATABASE()
+          AND table_name = :table_name
+          AND character_maximum_length IS NOT NULL
+        """
+    )
+    with engine.connect() as conn:
+        rows = conn.execute(query, {"table_name": table_name}).fetchall()
+    return {row[0]: int(row[1]) for row in rows}
+
+
+def apply_column_length_limits(
+    df: pd.DataFrame, max_lengths: Optional[Dict[str, int]]
+) -> pd.DataFrame:
+    if not max_lengths:
+        return df
+    for col, max_len in max_lengths.items():
+        if col in df.columns:
+            df[col] = df[col].astype("string").str.slice(0, max_len)
+    return df
+
+
+def normalize_dataframe(
+    df: pd.DataFrame,
+    dedupe_in_file: bool,
+    max_lengths: Optional[Dict[str, int]] = None,
+) -> pd.DataFrame:
     df.columns = [str(c).strip() for c in df.columns]
     df = df.rename(columns=KOR_TO_ENG)
 
@@ -256,7 +286,8 @@ def normalize_dataframe(df: pd.DataFrame, dedupe_in_file: bool) -> pd.DataFrame:
         df = df.drop_duplicates(subset=REQUIRED_COLUMNS, keep="last")
 
     target_columns = [col for col in KOR_TO_ENG.values() if col in df.columns]
-    return df[target_columns]
+    df = df[target_columns]
+    return apply_column_length_limits(df, max_lengths)
 
 
 def iter_file_chunks(file_path: str) -> Iterable[pd.DataFrame]:
@@ -289,13 +320,16 @@ def process_file(
     dedupe_in_file: bool,
     dry_run: bool,
     file_name: str,
+    max_lengths: Optional[Dict[str, int]],
 ) -> int:
     file_rows = 0
     if dry_run:
         for idx, chunk in enumerate(iter_file_chunks(file_path), start=1):
             if chunk.empty:
                 continue
-            normalized = normalize_dataframe(chunk, dedupe_in_file)
+            normalized = normalize_dataframe(
+                chunk, dedupe_in_file, max_lengths=max_lengths
+            )
             file_rows += len(normalized)
             print(
                 f"   ↳ [{file_name}] 청크 {idx}: {len(normalized)}건 검증 (누적 {file_rows}건)"
@@ -306,7 +340,9 @@ def process_file(
         for idx, chunk in enumerate(iter_file_chunks(file_path), start=1):
             if chunk.empty:
                 continue
-            normalized = normalize_dataframe(chunk, dedupe_in_file)
+            normalized = normalize_dataframe(
+                chunk, dedupe_in_file, max_lengths=max_lengths
+            )
             normalized.to_sql(
                 name=TABLE_NAME,
                 con=conn,
@@ -334,6 +370,11 @@ def main() -> None:
     engine = create_engine(DB_CONNECTION_STR)
     ensure_log_table(engine)
     run_id = str(uuid.uuid4())
+    try:
+        column_max_lengths = fetch_column_max_lengths(engine, TABLE_NAME)
+    except Exception as exc:
+        column_max_lengths = {}
+        print(f"⚠️ 컬럼 길이 조회 실패 (길이 제한 미적용): {exc}")
 
     success_count = 0
     failed_count = 0
@@ -390,6 +431,7 @@ def main() -> None:
                 dedupe_in_file=args.dedupe_in_file,
                 dry_run=args.dry_run,
                 file_name=file_name,
+                max_lengths=column_max_lengths,
             )
             duration = time.time() - start_time
             if args.dry_run:
