@@ -52,11 +52,24 @@ python main.py
 **다운로드 폴더의 모든 데이터 일괄 처리:**
 
 ```bash
-python manual_upload.py
+python manual_upload.py --downloads-dir ./downloads --completed-dir ./completed
 ```
 
--   `downloads` 폴더의 모든 CSV 파일을 데이터베이스에 저장
--   처리 완료된 파일은 `completed` 폴더로 자동 이동
+-   `./downloads`의 CSV/XLSX/XLS 파일을 MySQL `procurement_raw`에 적재
+-   적재 성공 파일은 `./completed`로 자동 이동
+-   파일 단위 트랜잭션 및 적재 로그(`procurement_ingestion_log`) 기록
+
+**옵션 예시:**
+
+```bash
+# 중복 제거 옵션 + 실패 시 계속 진행
+python manual_upload.py --dedupe-in-file --no-stop-on-fail
+
+# 정규화/검증만 수행 (DB insert 없음)
+python manual_upload.py --dry-run
+```
+
+> XLSX/XLS 처리를 위해 `openpyxl`/`xlrd` 설치가 필요할 수 있습니다.
 
 ---
 
