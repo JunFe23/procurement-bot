@@ -71,6 +71,17 @@ python manual_upload.py --dry-run
 
 > XLSX/XLS 처리를 위해 `openpyxl`/`xlrd` 설치가 필요할 수 있습니다.
 
+**특정품목 조달 내역 CSV 적재:**
+
+```bash
+python specific_item_upload.py --downloads-dir ./downloads_specific_item
+```
+
+-   `./downloads_specific_item` 내 `*특정품목조달내역*.csv` 파일만 대상으로 적재
+-   대상 테이블: `procurement_specific_item_raw`
+-   적재 로그: `procurement_specific_item_ingestion_log`
+-   완료 파일은 `./completed_specific_item`로 이동
+
 ---
 
 ### ☁️ EC2에서 실행하기
