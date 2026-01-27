@@ -229,8 +229,11 @@ def apply_column_length_limits(
 def detect_header_row(file_path: str, max_lines: int = 200) -> int:
     with open(file_path, "r", encoding=ENCODING, errors="ignore") as handle:
         for idx, line in enumerate(handle):
-            if HEADER_MATCH in line:
-                return idx
+            if HEADER_MATCH in line and "\t" in line:
+                # Check if it looks like a real header (multiple tab-separated columns)
+                parts = line.split("\t")
+                if len(parts) > 10:  # Real header should have many columns
+                    return idx
             if idx >= max_lines:
                 break
     raise ValueError(f"Header row not found in {file_path}")
@@ -244,9 +247,11 @@ def iter_file_chunks(file_path: str) -> Iterable[pd.DataFrame]:
         encoding=ENCODING,
         sep=SEPARATOR,
         skiprows=skiprows,
-        low_memory=False,
+        header=0,
         thousands=",",
         chunksize=CHUNK_SIZE,
+        engine="python",
+        on_bad_lines="skip",
     )
 
 
@@ -256,11 +261,21 @@ def normalize_dataframe(
     max_lengths: Optional[Dict[str, int]] = None,
 ) -> pd.DataFrame:
     df.columns = [str(c).strip().strip('"') for c in df.columns]
+    
+    # Debug: print first few column names before rename
+    if len(df) > 0:
+        print(f"DEBUG: Columns before rename: {list(df.columns)[:5]}")
+    
     df = df.rename(columns=KOR_TO_ENG)
+    
+    # Debug: print first few column names after rename
+    if len(df) > 0:
+        print(f"DEBUG: Columns after rename: {list(df.columns)[:5]}")
 
     missing = [col for col in REQUIRED_COLUMNS if col not in df.columns]
     if missing:
-        raise ValueError(f"Missing required columns: {missing}")
+        available = list(df.columns)[:20]
+        raise ValueError(f"Missing required columns: {missing}. All available columns: {available}")
 
     df["delivery_contract_no"] = (
         df["delivery_contract_no"].fillna("").astype(str).str.strip()
