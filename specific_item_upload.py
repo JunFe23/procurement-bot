@@ -7,10 +7,11 @@ Usage:
 """
 
 import argparse
-import glob
+import fnmatch
 import os
 import time
 import uuid
+import unicodedata
 from typing import Dict, Iterable, List, Optional
 
 import pandas as pd
@@ -237,11 +238,12 @@ def detect_header_row(file_path: str, max_lines: int = 200) -> int:
 
 def iter_file_chunks(file_path: str) -> Iterable[pd.DataFrame]:
     header_row = detect_header_row(file_path)
+    skiprows = list(range(header_row))
     return pd.read_csv(
         file_path,
         encoding=ENCODING,
         sep=SEPARATOR,
-        skiprows=header_row,
+        skiprows=skiprows,
         low_memory=False,
         thousands=",",
         chunksize=CHUNK_SIZE,
@@ -277,6 +279,10 @@ def normalize_dataframe(
     return apply_column_length_limits(df, max_lengths)
 
 
+def normalize_name(value: str) -> str:
+    return unicodedata.normalize("NFC", value)
+
+
 def list_source_files(downloads_dir: str, pattern: str, file_arg: Optional[str]) -> List[str]:
     if file_arg:
         candidate = os.path.expanduser(file_arg)
@@ -286,7 +292,16 @@ def list_source_files(downloads_dir: str, pattern: str, file_arg: Optional[str])
         if os.path.exists(candidate):
             return [candidate]
         raise FileNotFoundError(f"File not found: {file_arg}")
-    return sorted(glob.glob(os.path.join(downloads_dir, pattern)))
+    normalized_pattern = normalize_name(pattern)
+    matched: List[str] = []
+    for name in os.listdir(downloads_dir):
+        if not name.lower().endswith(".csv"):
+            continue
+        normalized_name = normalize_name(name)
+        if not fnmatch.fnmatchcase(normalized_name, normalized_pattern):
+            continue
+        matched.append(os.path.join(downloads_dir, name))
+    return sorted(matched)
 
 
 def fetch_log_record(engine, file_path: str) -> Optional[Dict]:
