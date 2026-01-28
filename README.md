@@ -82,6 +82,11 @@ python specific_item_upload.py --downloads-dir ./downloads_specific_item
 -   적재 로그: `procurement_specific_item_ingestion_log`
 -   완료 파일은 `./completed_specific_item`로 이동
 
+**데이터베이스 테이블 조인 정보:**
+
+-   **종합쇼핑몰계약 엑셀 파일**의 `납품요구번호` 컬럼은 `procurement_specific_item_raw` 테이블의 `delivery_contract_no` (계약납품통합번호) 컬럼과 동일한 값을 가집니다.
+-   두 데이터 소스를 조인할 때 이 컬럼을 기준으로 연결할 수 있습니다.
+
 ---
 
 ### ☁️ EC2에서 실행하기
