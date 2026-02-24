@@ -1,5 +1,7 @@
 .venv/
 __pycache__/
+
+# CSV/엑셀 데이터 파일 (다운로드·적재용, 커밋 제외)
 *.csv
 *.xlsx
 downloads/
@@ -11,5 +13,8 @@ downloads/
 # 디버깅용 스크린샷 이미지 무시
 *.png
 
-# 수집된 데이터 폴더 무시
+# 수집된 데이터 폴더 내부 파일 무시 (downloads_construction, completed_construction 은 폴더만 커밋)
 downloads/
+downloads_specific_item/
+completed/
+completed_specific_item/

@@ -30,6 +30,18 @@
 - **Data Processing:** Pandas
 - **Environment:** macOS (Apple Silicon M1)
 
+## 📁 폴더 구조 (데이터 적재용)
+
+| 소스 폴더 (CSV 넣는 곳) | 완료 이동 폴더 | 스크립트 | 대상 테이블 |
+|-------------------------|----------------|----------|-------------|
+| `downloads/` | `completed/` | `manual_upload.py` | `procurement_raw` (물품 계약 상세) |
+| `downloads_specific_item/` | `completed_specific_item/` | `specific_item_upload.py` | `procurement_specific_item_raw` (특정품목 조달 내역) |
+| **`downloads_construction/`** | **`completed_construction/`** | **`construction_upload.py`** | **`construction_contract_raw`** (공사 계약 내역) |
+
+- **공사 계약 내역(2017~2025 등)**: CSV를 **`downloads_construction/`** 에 넣고 **`construction_upload.py`** 로 적재. 성공한 파일은 **`completed_construction/`** 로 이동하며, **`construction_contract_raw`** 테이블에 저장됩니다.
+
+---
+
 ## ⚙️ 실행 방법 (Usage)
 
 ### 로컬 환경 (macOS/Windows)
@@ -49,7 +61,7 @@ pip install -r requirements.txt
 python main.py
 ```
 
-**다운로드 폴더의 모든 데이터 일괄 처리:**
+**다운로드 폴더의 모든 데이터 일괄 처리 (물품 계약 상세):**
 
 ```bash
 python manual_upload.py --downloads-dir ./downloads --completed-dir ./completed
@@ -58,6 +70,18 @@ python manual_upload.py --downloads-dir ./downloads --completed-dir ./completed
 - `./downloads`의 CSV/XLSX/XLS 파일을 MySQL `procurement_raw`에 적재
 - 적재 성공 파일은 `./completed`로 자동 이동
 - 파일 단위 트랜잭션 및 적재 로그(`procurement_ingestion_log`) 기록
+
+**공사 계약 내역(2017~2025 등) 일괄 처리:**
+
+```bash
+python construction_upload.py --downloads-dir ./downloads_construction --completed-dir ./completed_construction
+```
+
+- **테이블 자동 생성**: `construction_contract_raw`가 없으면 스크립트 실행 시 생성 (물품 적재처럼 Python만 실행하면 됨)
+- CSV는 **`downloads_construction/`** 에 넣어 두고 실행
+- 적재 성공 파일은 **`completed_construction/`** 로 자동 이동
+- 로그 테이블: `construction_ingestion_log`
+- 옵션: `--dry-run`, `--dedupe-in-file`, `--no-stop-on-fail` 지원
 
 **옵션 예시:**
 
