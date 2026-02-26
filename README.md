@@ -37,8 +37,10 @@
 | `downloads/` | `completed/` | `manual_upload.py` | `procurement_raw` (물품 계약 상세) |
 | `downloads_specific_item/` | `completed_specific_item/` | `specific_item_upload.py` | `procurement_specific_item_raw` (특정품목 조달 내역) |
 | **`downloads_construction/`** | **`completed_construction/`** | **`construction_upload.py`** | **`construction_contract_raw`** (공사 계약 내역) |
+| **`downloads_service/`** | **`completed_service/`** | **`service_upload.py`** | **`service_contract_raw`** (용역 계약 업체 내역) |
 
 - **공사 계약 내역(2017~2025 등)**: CSV를 **`downloads_construction/`** 에 넣고 **`construction_upload.py`** 로 적재. 성공한 파일은 **`completed_construction/`** 로 이동하며, **`construction_contract_raw`** 테이블에 저장됩니다.
+- **용역 계약 업체 내역**: CSV를 **`downloads_service/`** 에 넣고 **`service_upload.py`** 로 적재. 성공한 파일은 **`completed_service/`** 로 이동하며, **`service_contract_raw`** 테이블에 저장됩니다. PK는 (계약납품통합번호, 계약납품통합변경차수, 계약업체사업자등록번호)입니다.
 
 ---
 
@@ -82,6 +84,18 @@ python construction_upload.py --downloads-dir ./downloads_construction --complet
 - 적재 성공 파일은 **`completed_construction/`** 로 자동 이동
 - 로그 테이블: `construction_ingestion_log`
 - 옵션: `--dry-run`, `--dedupe-in-file`, `--no-stop-on-fail` 지원
+
+**용역 계약 업체 내역 일괄 처리:**
+
+```bash
+python service_upload.py --downloads-dir ./downloads_service --completed-dir ./completed_service
+```
+
+- **테이블 자동 생성**: `service_contract_raw`가 없으면 스크립트 실행 시 생성
+- CSV는 **`downloads_service/`** 에 넣어 두고 실행 (용역 리포트는 UTF-16 탭 구분, 헤더 72번째 줄)
+- 적재 성공 파일은 **`completed_service/`** 로 자동 이동
+- 로그 테이블: `service_ingestion_log`
+- PK: (계약납품통합번호, 계약납품통합변경차수, 계약업체사업자등록번호) — 공동수급 시 업체별 1행
 
 **옵션 예시:**
 

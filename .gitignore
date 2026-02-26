@@ -13,8 +13,17 @@ downloads/
 # 디버깅용 스크린샷 이미지 무시
 *.png
 
-# 수집된 데이터 폴더 내부 파일 무시 (downloads_construction, completed_construction 은 폴더만 커밋)
+# 수집된 데이터 폴더 내부 파일 무시 (폴더는 .gitkeep만 커밋, CSV 등은 무시)
 downloads/
 downloads_specific_item/
 completed/
 completed_specific_item/
+# 공사/용역: 폴더 내부만 무시, .gitkeep은 커밋
+downloads_construction/*
+!downloads_construction/.gitkeep
+completed_construction/*
+!completed_construction/.gitkeep
+downloads_service/*
+!downloads_service/.gitkeep
+completed_service/*
+!completed_service/.gitkeep
