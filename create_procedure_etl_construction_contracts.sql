@@ -79,14 +79,24 @@ BEGIN
       bid_notice_no,
       first_contract_amount,
       contract_amount,
-      COALESCE(STR_TO_DATE(TRIM(first_contract_date), '%Y%m%d'), STR_TO_DATE(TRIM(first_contract_date), '%Y-%m-%d')) AS first_contract_date_d,
-      COALESCE(STR_TO_DATE(TRIM(contract_date), '%Y%m%d'), STR_TO_DATE(TRIM(contract_date), '%Y-%m-%d')) AS contract_date_d,
+      COALESCE(
+        STR_TO_DATE(SUBSTRING_INDEX(TRIM(first_contract_date), '.', 1), '%Y%m%d'),
+        STR_TO_DATE(SUBSTRING_INDEX(TRIM(first_contract_date), ' ', 1), '%Y-%m-%d')
+      ) AS first_contract_date_d,
+      COALESCE(
+        STR_TO_DATE(SUBSTRING_INDEX(TRIM(contract_date), '.', 1), '%Y%m%d'),
+        STR_TO_DATE(SUBSTRING_INDEX(TRIM(contract_date), ' ', 1), '%Y-%m-%d')
+      ) AS contract_date_d,
       ROW_NUMBER() OVER (
         PARTITION BY contract_no
         ORDER BY
           (CASE WHEN is_final_contract = 'Y' THEN 1 ELSE 0 END) DESC,
           contract_change_seq DESC,
-          COALESCE(STR_TO_DATE(TRIM(contract_date), '%Y%m%d'), STR_TO_DATE(TRIM(contract_date), '%Y-%m-%d'), '1000-01-01') DESC
+          COALESCE(
+            STR_TO_DATE(SUBSTRING_INDEX(TRIM(contract_date), '.', 1), '%Y%m%d'),
+            STR_TO_DATE(SUBSTRING_INDEX(TRIM(contract_date), ' ', 1), '%Y-%m-%d'),
+            DATE '1000-01-01'
+          ) DESC
       ) AS rn
     FROM construction_contract_raw
     WHERE (public_procurement_category_major = '시설공사')
@@ -137,7 +147,10 @@ BEGIN
   SELECT
     r.contract_no,
     r.contract_change_seq,
-    COALESCE(STR_TO_DATE(TRIM(r.contract_date), '%Y%m%d'), STR_TO_DATE(TRIM(r.contract_date), '%Y-%m-%d')),
+    COALESCE(
+      STR_TO_DATE(SUBSTRING_INDEX(TRIM(r.contract_date), '.', 1), '%Y%m%d'),
+      STR_TO_DATE(SUBSTRING_INDEX(TRIM(r.contract_date), ' ', 1), '%Y-%m-%d')
+    ),
     r.contract_amount,
     r.contract_amount_delta,
     r.first_contract_amount,
