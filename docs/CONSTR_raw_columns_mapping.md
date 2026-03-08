@@ -9,7 +9,7 @@ USE g2b;
 SHOW COLUMNS FROM construction_contract_raw;
 ```
 
-현재 DDL 기준 **construction_contract_raw → 표준명(history/summary용) 매핑**:
+현재 DDL 기준 **construction_contract_raw → 표준명(flat/longterm_group·history·summary용) 매핑**:
 
 | raw 컬럼명 (construction_contract_raw) | 표준/용도 | 비고 |
 |----------------------------------------|-----------|------|
@@ -66,29 +66,39 @@ SHOW COLUMNS FROM construction_contract_raw;
 
 ## 2. 실행 순서 (트랜잭션 권장)
 
+### 2.1 화면·다운로드용 (flat + longterm_group, 권장)
+
 1. **컬럼 확인**  
    `SHOW COLUMNS FROM construction_contract_raw;` 로 실제 컬럼명 확인 후, 위 매핑표와 다르면 DDL/ETL에서 컬럼명 수정.
 
 2. **DDL 적용 (순서 유지)**
-   - `alter_table_construction_contract_summary_dates_and_soft_delete.sql`  
-     (summary에 DATE, is_active, last_seen_date, created_at, updated_at 반영)
-   - `create_table_construction_contract_change_history.sql`  
-     (history 테이블 생성, FK → summary)
+   - `create_table_construction_contract_flat.sql` — 펼쳐서 보기용
+   - `create_table_construction_contract_longterm_group.sql` — 합쳐서 보기용
 
-3. **ETL 프로시저 생성**
-   - `create_procedure_etl_construction_contracts.sql`  
-     → `CALL sp_etl_construction_contracts();` 로 증분 갱신
+3. **ETL v2 프로시저 생성**
+   - `create_procedure_etl_construction_contracts_v2.sql`  
+     → `CALL sp_etl_construction_contracts_v2();` 로 flat·longterm_group 증분 갱신
 
 4. **ETL 실행 (트랜잭션 권장)**
 
 ```sql
 START TRANSACTION;
-CALL sp_etl_construction_contracts();
+CALL sp_etl_construction_contracts_v2();
 COMMIT;
 -- 실패 시: ROLLBACK;
 ```
 
-- **프로시저 내부 Step 순서**: FK 때문에 **Step2(summary UPSERT) → Step1(history UPSERT) → Step3(summary is_active 정리)**.
+- **프로시저 내부**: Step1 raw→flat UPSERT, Step2 raw→longterm_group UPSERT, Step3 flat is_active 정리, Step4 longterm_group is_active 정리.
+- **construction_upload.py**는 raw 적재만 수행. ETL 호출은 수동/스케줄/스프링에서 수행.
+
+### 2.2 기존 summary/history (선택, deprecated for screen)
+
+- `alter_table_construction_contract_summary_dates_and_soft_delete.sql`  
+  (summary에 DATE, is_active, last_seen_date, created_at, updated_at 반영)
+- `create_table_construction_contract_change_history.sql`  
+  (history 테이블 생성, FK → summary)
+- `create_procedure_etl_construction_contracts.sql`  
+  → `CALL sp_etl_construction_contracts();` (summary/history용). 화면 구현은 **flat + longterm_group + v2** 사용.
 
 ---
 

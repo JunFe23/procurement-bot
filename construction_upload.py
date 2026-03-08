@@ -1,6 +1,8 @@
 """
 공사 계약 내역 CSV → construction_contract_raw 적재
 (물품 계약 상세/특정품목과 동일 방식: 파일 단위 트랜잭션, 로그, 완료 시 completed 이동)
+조회용 테이블(flat/longterm_group) 갱신은 이 스크립트에서 하지 않음.
+→ 수동/스케줄/스프링에서 CALL sp_etl_construction_contracts_v2(); 실행.
 
 Usage:
   python construction_upload.py --downloads-dir ./downloads_construction --completed-dir ./completed_construction
