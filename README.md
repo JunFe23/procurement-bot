@@ -85,14 +85,14 @@ python construction_upload.py --downloads-dir ./downloads_construction --complet
 - 로그 테이블: `construction_ingestion_log`
 - 옵션: `--dry-run`, `--dedupe-in-file`, `--no-stop-on-fail` 지원
 
-**공사 테이블 설계 (raw → flat + longterm_group, history 선택):**
+**공사 테이블 설계 (raw → flat + grouped, history 선택):**
 
 - **raw** (`construction_contract_raw`): CSV 원본. PK `(contract_no, contract_change_seq)`. **`construction_upload.py`는 raw 적재까지만 담당.** 적재 후 ETL은 수동/스케줄/스프링에서 프로시저 호출.
 - **flat** (`construction_contract_flat`): **펼쳐서 보기**·단건 조회용. 시설공사만, **contract_no당 최종 1건**. 기간 필터: **contract_date**. 화면 컬럼 + saved, is_active, last_seen_date, etl_loaded_at. DATE/BIGINT.
-- **longterm_group** (`construction_contract_longterm_group`): **합쳐서 보기**·장기계약 그룹용. 시설공사만, **group_key**(= COALESCE(initial_year_contract_no, contract_no))당 1건. 최종계약금액 = 그룹 **contract_amount 합계**. 기간 필터: **initial_contract_date**. 문자열 컬럼은 초기 계약 기준.
-- **history** (`construction_contract_change_history`): 변경 이력(선택). 화면 구현 핵심은 flat + longterm_group. history는 디버깅/이력용으로 유지 가능.
-- **갱신 방식**: **TRUNCATE 없이** **`sp_etl_construction_contracts_v2()`** 한 번으로 **flat UPSERT → longterm_group UPSERT → flat/longterm_group is_active 정리**. raw에 없어진 계약/그룹은 각각 `is_active='N'`.
-- **실행 순서 (최초 1회)**: raw 테이블 → flat DDL → longterm_group DDL → `create_procedure_etl_construction_contracts_v2.sql` 적용. 이후 `CALL sp_etl_construction_contracts_v2();` 수동 또는 스케줄/스프링 호출.
+- **grouped** (`construction_contract_grouped`): **합쳐서 보기**용. 시설공사 **전체**(장기+비장기). 장기=group_key당 1행(금액 합계), 비장기=단건 1행 같은 양식. 토글 ON이면 이 테이블만 조회. 기간 필터: **initial_contract_date**.
+- **history** (`construction_contract_change_history`): 변경 이력(선택). 화면 구현 핵심은 flat + grouped. history는 디버깅/이력용으로 유지 가능.
+- **갱신 방식**: **TRUNCATE 없이** **`sp_etl_construction_contracts()`** 한 번으로 **flat UPSERT → grouped UPSERT → flat/grouped is_active 정리**. raw에 없어진 계약/그룹은 각각 `is_active='N'`.
+- **실행 순서 (최초 1회)**: raw 테이블 → flat DDL → `create_table_construction_contract_grouped.sql` → `create_procedure_etl_construction_contracts.sql` 적용. 이후 `CALL sp_etl_construction_contracts();` 수동 또는 스케줄/스프링 호출.
 - 상세: `docs/공사_construction_작업정리.md`, `docs/CONSTR_raw_columns_mapping.md` 참고.
 
 **용역 계약 업체 내역 일괄 처리:**
