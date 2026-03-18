@@ -2,8 +2,9 @@
 용역 계약 업체 내역 CSV → service_contract_raw 적재
 (물품/공사와 동일 방식: 파일 단위 트랜잭션, 로그, 완료 시 completed_service 이동)
 
-PK: (계약납품통합번호, 계약납품통합변경차수, 계약업체사업자등록번호)
-- 동일 계약·변경차수에 공동수급으로 여러 업체가 있을 수 있으므로 업체별 1행.
+PK: (계약납품통합번호, 계약납품통합변경차수, 계약업체사업자등록번호, 업종)
+- 분담이행 공동수급에서 동일 업체가 여러 업종(면허)으로 참여하는 경우
+  업종별로 별도 행이 생성되므로 업종까지 포함해야 유일성이 보장됨.
 
 Usage:
   python service_upload.py --downloads-dir ./downloads_service --completed-dir ./completed_service
@@ -55,6 +56,9 @@ SKIP_ROWS = 71   # 용역 리포트: 헤더가 72번째 줄
 CHUNK_SIZE = 10000
 
 # 용역 계약 업체 내역 CSV 한글 컬럼명 → 영문
+# CSV 구조 특이사항:
+#   대표물품분류(코드) | (빈헤더=명칭) | 세부품명(코드) | (빈헤더=명칭) | ... | 수요기관(코드) | (빈헤더=명칭)
+#   빈 헤더 컬럼은 pandas가 'Unnamed: N' 으로 명명 → _fix_unnamed_columns() 에서 처리
 KOR_TO_ENG = {
     "계약납품통합번호": "contract_delivery_integrated_no",
     "계약납품통합변경차수": "contract_delivery_integrated_change_seq",
@@ -63,8 +67,10 @@ KOR_TO_ENG = {
     "입찰공고차수": "bid_notice_seq",
     "입찰공고번호": "bid_notice_no",
     "초년도계약번호": "initial_year_contract_no",
-    "대표물품분류": "representative_item_category",
-    "세부품명": "detail_item_name",
+    "대표물품분류": "representative_item_category_code",   # 코드 (e.g. '76121598')
+    "대표물품분류명": "representative_item_category",       # 명칭 (빈헤더 → _fix_unnamed_columns)
+    "세부품명": "detail_item_code",                        # 코드 (e.g. '7612159801')
+    "세부품명명": "detail_item_name",                       # 명칭 (빈헤더 → _fix_unnamed_columns)
     "공공조달분류": "public_procurement_category",
     "대분류공공조달분류": "public_procurement_category_major",
     "중분류공공조달분류": "public_procurement_category_mid",
@@ -101,7 +107,8 @@ KOR_TO_ENG = {
     "분담업종": "assigned_business_type",
     "계약변경구분": "contract_change_type",
     "계약지청": "contract_branch",
-    "수요기관": "demand_agency",
+    "수요기관": "demand_agency_code",                      # 코드 (e.g. '1613191')
+    "수요기관명": "demand_agency",                          # 명칭 (빈헤더 → _fix_unnamed_columns)
     "수요기관지역": "demand_agency_region",
     "수요기관사업자등록번호": "demand_agency_biz_no",
     "소관구분": "department_type",
@@ -131,6 +138,7 @@ REQUIRED_COLUMNS = [
     "contract_delivery_integrated_no",
     "contract_delivery_integrated_change_seq",
     "vendor_biz_reg_no",
+    "business_type",
 ]
 
 CSV_DTYPE = {
@@ -140,6 +148,12 @@ CSV_DTYPE = {
     "초년도계약번호": str,
     "수요기관사업자등록번호": str,
     "계약업체사업자등록번호": str,
+    # 날짜 컬럼: float 파싱 방지 ('20151229.0' 같은 변환 차단)
+    "기준일자": str,
+    "최초기준일자": str,
+    "착수일자": str,
+    "완수일자": str,
+    "최대납품기한일자": str,
 }
 
 
@@ -183,80 +197,109 @@ def ensure_log_table(engine) -> None:
 def ensure_data_table(engine) -> None:
     create_sql = """
         CREATE TABLE IF NOT EXISTS service_contract_raw (
-            contract_delivery_integrated_no       VARCHAR(100)  NOT NULL COMMENT '계약납품통합번호',
+            -- ===== PK =====
+            contract_delivery_integrated_no        VARCHAR(100)  NOT NULL COMMENT '계약납품통합번호',
             contract_delivery_integrated_change_seq BIGINT        NOT NULL COMMENT '계약납품통합변경차수',
-            vendor_biz_reg_no                     VARCHAR(50)   NOT NULL COMMENT '계약업체사업자등록번호',
-            contract_request_no                   VARCHAR(100)  DEFAULT NULL,
-            long_term_continuation_seq            VARCHAR(20)   DEFAULT NULL,
-            bid_notice_seq                        VARCHAR(20)   DEFAULT NULL,
-            bid_notice_no                         VARCHAR(50)   DEFAULT NULL,
-            initial_year_contract_no              VARCHAR(100)  DEFAULT NULL,
-            representative_item_category         VARCHAR(50)   DEFAULT NULL,
-            detail_item_name                      VARCHAR(200)  DEFAULT NULL,
-            public_procurement_category           VARCHAR(50)   DEFAULT NULL,
-            public_procurement_category_major     VARCHAR(100)  DEFAULT NULL,
-            public_procurement_category_mid      VARCHAR(100)  DEFAULT NULL,
-            contract_title                        TEXT          DEFAULT NULL,
-            contract_period_content               VARCHAR(200)  DEFAULT NULL,
-            public_procurement_type               VARCHAR(50)   DEFAULT NULL,
-            is_mas                                VARCHAR(10)   DEFAULT NULL,
-            is_quality_product                    VARCHAR(10)   DEFAULT NULL,
-            is_final_contract_delivery_required   VARCHAR(10)   DEFAULT NULL,
-            is_initial_contract_delivery_required VARCHAR(10)   DEFAULT NULL,
-            is_initial_long_term_contract         VARCHAR(10)   DEFAULT NULL,
-            base_year                             VARCHAR(10)   DEFAULT NULL,
-            base_year_month                       VARCHAR(10)   DEFAULT NULL,
-            base_half_year                        VARCHAR(10)   DEFAULT NULL,
-            base_quarter                          VARCHAR(10)   DEFAULT NULL,
-            base_date                             VARCHAR(20)   DEFAULT NULL,
-            max_delivery_due_date                 VARCHAR(20)   DEFAULT NULL,
-            initial_base_date                     VARCHAR(20)   DEFAULT NULL,
-            completion_date                       VARCHAR(20)   DEFAULT NULL,
-            start_date                            VARCHAR(20)   DEFAULT NULL,
-            procurement_work_area                 VARCHAR(50)   DEFAULT NULL,
-            procurement_method_type              VARCHAR(50)   DEFAULT NULL,
-            contract_type                         VARCHAR(50)   DEFAULT NULL,
-            contract_method                       VARCHAR(50)   DEFAULT NULL,
-            contract_law_type                     VARCHAR(100)  DEFAULT NULL,
-            joint_supply_type                     VARCHAR(100)  DEFAULT NULL,
-            joint_supply_reason                   VARCHAR(200)  DEFAULT NULL,
-            new_long_term_type                    VARCHAR(50)   DEFAULT NULL,
-            clause_no                             VARCHAR(100)  DEFAULT NULL,
-            award_method                          VARCHAR(100)  DEFAULT NULL,
-            standard_contract_method              VARCHAR(100)  DEFAULT NULL,
-            site_region                           VARCHAR(100)  DEFAULT NULL,
-            business_type                         VARCHAR(100)  DEFAULT NULL,
-            assigned_business_type                 VARCHAR(100)  DEFAULT NULL,
-            contract_change_type                  VARCHAR(50)   DEFAULT NULL,
-            contract_branch                       VARCHAR(100)  DEFAULT NULL,
-            demand_agency                         TEXT          DEFAULT NULL,
-            demand_agency_region                  VARCHAR(200)  DEFAULT NULL,
-            demand_agency_biz_no                  VARCHAR(50)   DEFAULT NULL,
-            department_type                       VARCHAR(50)   DEFAULT NULL,
-            demand_agency_top                     VARCHAR(200)  DEFAULT NULL,
-            vendor_name                           TEXT          DEFAULT NULL,
-            company_type_at_contract              VARCHAR(50)   DEFAULT NULL,
-            is_social_enterprise_at_contract      VARCHAR(10)   DEFAULT NULL,
-            vendor_name_at_contract               VARCHAR(200)  DEFAULT NULL,
-            vendor_rep_at_contract                VARCHAR(100)  DEFAULT NULL,
-            vendor_region_at_contract             VARCHAR(200)  DEFAULT NULL,
-            is_women_enterprise_at_contract       VARCHAR(10)   DEFAULT NULL,
-            is_disabled_enterprise_at_contract    VARCHAR(10)   DEFAULT NULL,
-            total_supplementary_amount            BIGINT        DEFAULT NULL,
-            first_contract_amount                 BIGINT        DEFAULT NULL,
-            contract_share_pct                    VARCHAR(20)   DEFAULT NULL,
-            total_supplementary_share_amount      BIGINT        DEFAULT NULL,
-            contract_share_amount                 BIGINT        DEFAULT NULL,
-            contract_share_amount_delta           BIGINT        DEFAULT NULL,
-            contract_delivery_qty                 BIGINT        DEFAULT NULL,
-            contract_delivery_qty_delta           BIGINT        DEFAULT NULL,
-            contract_amount                       BIGINT        DEFAULT NULL,
-            contract_amount_delta                 BIGINT        DEFAULT NULL,
-            PRIMARY KEY (contract_delivery_integrated_no, contract_delivery_integrated_change_seq, vendor_biz_reg_no),
+            vendor_biz_reg_no                      VARCHAR(50)   NOT NULL COMMENT '계약업체사업자등록번호',
+            business_type                          VARCHAR(200)  NOT NULL DEFAULT '' COMMENT '업종(면허) — 공동수급 시 동일 업체가 복수 업종으로 참여 가능하므로 PK 구성 요소',
+
+            -- ===== 계약 식별 =====
+            contract_request_no                    VARCHAR(100)  DEFAULT NULL COMMENT '계약요청접수번호',
+            long_term_continuation_seq             VARCHAR(20)   DEFAULT NULL COMMENT '장기계속차수',
+            bid_notice_seq                         VARCHAR(20)   DEFAULT NULL COMMENT '입찰공고차수',
+            bid_notice_no                          VARCHAR(50)   DEFAULT NULL COMMENT '입찰공고번호',
+            initial_year_contract_no               VARCHAR(100)  DEFAULT NULL COMMENT '초년도계약번호 (장기계약 그룹 키)',
+
+            -- ===== 분류 =====
+            representative_item_category_code      VARCHAR(50)   DEFAULT NULL COMMENT '대표물품분류코드 (숫자코드, e.g. 76121598)',
+            representative_item_category           VARCHAR(200)  DEFAULT NULL COMMENT '대표물품분류명칭 (e.g. 건설폐기물처리서비스)',
+            detail_item_code                       VARCHAR(50)   DEFAULT NULL COMMENT '세부품명코드 (숫자코드, e.g. 7612159801)',
+            detail_item_name                       VARCHAR(200)  DEFAULT NULL COMMENT '세부품명명칭 (e.g. 건설폐기물처리서비스)',
+            public_procurement_category            VARCHAR(50)   DEFAULT NULL COMMENT '공공조달분류코드 (ETL 필터 기준)',
+            public_procurement_category_major      VARCHAR(100)  DEFAULT NULL COMMENT '대분류 공공조달분류',
+            public_procurement_category_mid        VARCHAR(100)  DEFAULT NULL COMMENT '중분류 공공조달분류',
+
+            -- ===== 계약 기본 정보 =====
+            contract_title                         TEXT          DEFAULT NULL COMMENT '계약명',
+            contract_period_content                VARCHAR(200)  DEFAULT NULL COMMENT '계약기간내용',
+            public_procurement_type                VARCHAR(50)   DEFAULT NULL COMMENT '공공조달구분',
+            procurement_work_area                  VARCHAR(50)   DEFAULT NULL COMMENT '조달업무영역 (일반용역/기술용역)',
+            procurement_method_type                VARCHAR(50)   DEFAULT NULL COMMENT '조달방식구분 (중앙조달 등)',
+            contract_type                          VARCHAR(50)   DEFAULT NULL COMMENT '계약유형 (총액계약 등)',
+            contract_method                        VARCHAR(50)   DEFAULT NULL COMMENT '계약방법 (제한경쟁 등)',
+            contract_law_type                      VARCHAR(100)  DEFAULT NULL COMMENT '계약법유형 (지방계약법 등)',
+            contract_change_type                   VARCHAR(50)   DEFAULT NULL COMMENT '계약변경구분 (내용변경 등)',
+            contract_branch                        VARCHAR(100)  DEFAULT NULL COMMENT '계약지청',
+
+            -- ===== 공동수급 =====
+            joint_supply_type                      VARCHAR(100)  DEFAULT NULL COMMENT '공동수급구성방식 (분담이행/공동이행)',
+            joint_supply_reason                    VARCHAR(200)  DEFAULT NULL COMMENT '공동수급사유',
+            assigned_business_type                 VARCHAR(200)  DEFAULT NULL COMMENT '분담업종',
+
+            -- ===== 장기계약 =====
+            new_long_term_type                     VARCHAR(50)   DEFAULT NULL COMMENT '신규장기구분 (신규(장기) 등)',
+
+            -- ===== 낙찰 =====
+            clause_no                              VARCHAR(100)  DEFAULT NULL COMMENT '조항호',
+            award_method                           VARCHAR(100)  DEFAULT NULL COMMENT '낙찰방법',
+            standard_contract_method               VARCHAR(100)  DEFAULT NULL COMMENT '표준계약방법',
+            site_region                            VARCHAR(100)  DEFAULT NULL COMMENT '현장지역',
+
+            -- ===== 여부 플래그 =====
+            is_mas                                 VARCHAR(10)   DEFAULT NULL COMMENT 'MAS여부',
+            is_quality_product                     VARCHAR(10)   DEFAULT NULL COMMENT '우수제품여부',
+            is_final_contract_delivery_required    VARCHAR(10)   DEFAULT NULL COMMENT '최종계약납품요구여부 (ETL flat 필터 기준)',
+            is_initial_contract_delivery_required  VARCHAR(10)   DEFAULT NULL COMMENT '최초계약납품요구여부',
+            is_initial_long_term_contract          VARCHAR(10)   DEFAULT NULL COMMENT '장기초년도계약여부',
+
+            -- ===== 기준 기간 =====
+            base_year                              VARCHAR(10)   DEFAULT NULL COMMENT '기준연도',
+            base_year_month                        VARCHAR(10)   DEFAULT NULL COMMENT '기준년월 (YYYYMM)',
+            base_half_year                         VARCHAR(10)   DEFAULT NULL COMMENT '기준반기',
+            base_quarter                           VARCHAR(10)   DEFAULT NULL COMMENT '기준분기',
+            base_date                              VARCHAR(20)   DEFAULT NULL COMMENT '기준일자 (YYYYMMDD, flat.contract_date 변환 원본)',
+            max_delivery_due_date                  VARCHAR(20)   DEFAULT NULL COMMENT '최대납품기한일자 (YYYYMMDD)',
+            initial_base_date                      VARCHAR(20)   DEFAULT NULL COMMENT '최초기준일자 (YYYYMMDD, flat.first_contract_date 변환 원본)',
+            completion_date                        VARCHAR(20)   DEFAULT NULL COMMENT '완수일자 (YYYYMMDD)',
+            start_date                             VARCHAR(20)   DEFAULT NULL COMMENT '착수일자 (YYYYMMDD)',
+
+            -- ===== 수요기관 =====
+            demand_agency_code                     VARCHAR(50)   DEFAULT NULL COMMENT '수요기관코드 (숫자코드, e.g. 1613191)',
+            demand_agency                          TEXT          DEFAULT NULL COMMENT '수요기관명칭 (e.g. 국토교통부 원주지방국토관리청)',
+            demand_agency_region                   VARCHAR(200)  DEFAULT NULL COMMENT '수요기관지역',
+            demand_agency_biz_no                   VARCHAR(50)   DEFAULT NULL COMMENT '수요기관사업자등록번호',
+            department_type                        VARCHAR(50)   DEFAULT NULL COMMENT '소관구분 (지방정부 등)',
+            demand_agency_top                      VARCHAR(200)  DEFAULT NULL COMMENT '수요기관최상위기관',
+
+            -- ===== 계약업체 정보 =====
+            vendor_name                            TEXT          DEFAULT NULL COMMENT '계약업체명',
+            company_type_at_contract               VARCHAR(50)   DEFAULT NULL COMMENT '계약시점 기업형태구분 (중소기업 등)',
+            is_social_enterprise_at_contract       VARCHAR(10)   DEFAULT NULL COMMENT '계약시점 사회적기업인증여부',
+            vendor_name_at_contract                VARCHAR(200)  DEFAULT NULL COMMENT '계약시점 업체명',
+            vendor_rep_at_contract                 VARCHAR(100)  DEFAULT NULL COMMENT '계약시점 업체대표자명',
+            vendor_region_at_contract              VARCHAR(200)  DEFAULT NULL COMMENT '계약시점 업체지역',
+            is_women_enterprise_at_contract        VARCHAR(10)   DEFAULT NULL COMMENT '계약시점 여성기업인증여부',
+            is_disabled_enterprise_at_contract     VARCHAR(10)   DEFAULT NULL COMMENT '계약시점 장애인기업인증여부',
+
+            -- ===== 금액 =====
+            total_supplementary_amount             BIGINT        DEFAULT NULL COMMENT '총부기계약금액',
+            first_contract_amount                  BIGINT        DEFAULT NULL COMMENT '최초계약금액',
+            contract_share_pct                     VARCHAR(20)   DEFAULT NULL COMMENT '계약지분율 (공동수급 지분 %)',
+            total_supplementary_share_amount       BIGINT        DEFAULT NULL COMMENT '총부기계약지분금액',
+            contract_share_amount                  BIGINT        DEFAULT NULL COMMENT '계약지분금액',
+            contract_share_amount_delta            BIGINT        DEFAULT NULL COMMENT '계약지분증감금액',
+            contract_delivery_qty                  BIGINT        DEFAULT NULL COMMENT '계약납품수량',
+            contract_delivery_qty_delta            BIGINT        DEFAULT NULL COMMENT '계약납품증감수량',
+            contract_amount                        BIGINT        DEFAULT NULL COMMENT '계약금액',
+            contract_amount_delta                  BIGINT        DEFAULT NULL COMMENT '계약증감금액',
+
+            PRIMARY KEY (contract_delivery_integrated_no, contract_delivery_integrated_change_seq, vendor_biz_reg_no, business_type),
             KEY idx_vendor_biz_reg_no (vendor_biz_reg_no),
-            KEY idx_base_date (base_date)
-        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
-          COMMENT='용역 계약 업체 내역 CSV 적재'
+            KEY idx_base_date (base_date),
+            KEY idx_public_procurement_category (public_procurement_category),
+            KEY idx_is_final (is_final_contract_delivery_required)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci
+          COMMENT='용역 계약 업체 내역 CSV 원본 적재. PK=(계약납품통합번호, 변경차수, 업체사업자번호, 업종)'
     """
     with engine.begin() as conn:
         conn.execute(text(create_sql))
@@ -374,12 +417,35 @@ def apply_column_length_limits(df: pd.DataFrame, max_lengths: Optional[Dict[str,
     return df
 
 
+def _fix_unnamed_columns(df: pd.DataFrame) -> pd.DataFrame:
+    """pandas가 'Unnamed: N'으로 명명한 빈 헤더 컬럼에 직전 컬럼 기반으로 이름을 부여.
+
+    CSV 구조:
+      대표물품분류(코드) | Unnamed:8(명칭) | 세부품명(코드) | Unnamed:10(명칭)
+      수요기관(코드)    | Unnamed:48(명칭)
+    """
+    PAIR_MAP = {
+        "대표물품분류": "대표물품분류명",
+        "세부품명":     "세부품명명",
+        "수요기관":     "수요기관명",
+    }
+    cols = list(df.columns)
+    for i, col in enumerate(cols):
+        if col.startswith("Unnamed:") and i > 0:
+            prev = cols[i - 1]
+            if prev in PAIR_MAP:
+                cols[i] = PAIR_MAP[prev]
+    df.columns = cols
+    return df
+
+
 def normalize_dataframe(
     df: pd.DataFrame,
     dedupe_in_file: bool,
     max_lengths: Optional[Dict[str, int]] = None,
 ) -> pd.DataFrame:
     df.columns = [str(c).strip().strip('"') for c in df.columns]
+    df = _fix_unnamed_columns(df)
     df = df.rename(columns=KOR_TO_ENG)
     df = df.loc[:, ~df.columns.duplicated(keep="first")]
 
@@ -401,6 +467,12 @@ def normalize_dataframe(
     df["vendor_biz_reg_no"] = df["vendor_biz_reg_no"].astype(str).str.strip()
     if (df["vendor_biz_reg_no"] == "").any():
         raise ValueError("vendor_biz_reg_no contains empty values")
+
+    # business_type은 PK 구성 요소이므로 NULL → 빈 문자열로 보정
+    if "business_type" in df.columns:
+        df["business_type"] = df["business_type"].fillna("").astype(str).str.strip()
+    else:
+        df["business_type"] = ""
 
     amount_cols = [
         "total_supplementary_amount", "first_contract_amount",
@@ -467,31 +539,29 @@ def process_file(
             _log(f"   ↳ [{file_name}] 청크 {idx}: {len(norm)}건 검증 (누적 {inserted}건)")
         return inserted
 
-    INSERT_BATCH_ROWS = 100
+    from sqlalchemy.dialects.mysql import insert as mysql_insert
+
+    def _insert_ignore(table, conn, keys, data_iter):
+        """INSERT IGNORE — PK 중복 행은 조용히 건너뜀."""
+        stmt = mysql_insert(table.table).values([dict(zip(keys, row)) for row in data_iter])
+        conn.execute(stmt.prefix_with("IGNORE"))
+
+    INSERT_BATCH_ROWS = 1000
     with engine.begin() as conn:
         for idx, chunk in enumerate(iter_file_chunks(file_path), start=1):
             if chunk.empty:
                 continue
             norm = normalize_dataframe(chunk, dedupe_in_file, max_lengths=max_lengths)
-            start_row = 0
-            while start_row < len(norm):
-                batch = norm.iloc[start_row : start_row + INSERT_BATCH_ROWS]
-                try:
-                    batch.to_sql(name=TABLE_NAME, con=conn, if_exists="append", index=False, method="multi")
-                    inserted += len(batch)
-                    start_row += len(batch)
-                except Exception as e:
-                    if len(batch) == 1:
-                        _log_failing_row(file_name, idx, start_row, 0, batch.iloc[0], e)
-                        raise
-                    for i in range(len(batch)):
-                        row_df = batch.iloc[i : i + 1]
-                        try:
-                            row_df.to_sql(name=TABLE_NAME, con=conn, if_exists="append", index=False, method="multi")
-                            inserted += 1
-                        except Exception as row_e:
-                            _log_failing_row(file_name, idx, start_row, i, batch.iloc[i], row_e)
-                            raise
+            try:
+                norm.to_sql(
+                    name=TABLE_NAME, con=conn, if_exists="append",
+                    index=False, method=_insert_ignore,
+                    chunksize=INSERT_BATCH_ROWS,
+                )
+                inserted += len(norm)
+            except Exception as e:
+                _log(f"   ↳ [{file_name}] 청크 {idx} 실패: {e}")
+                raise
             _log(f"   ↳ [{file_name}] 청크 {idx}: {len(norm)}건 insert (누적 {inserted}건)")
     return inserted
 
