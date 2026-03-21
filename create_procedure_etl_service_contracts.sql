@@ -1,16 +1,17 @@
 -- 용역 계약 ETL: raw → flat UPSERT → grouped UPSERT → flat/grouped is_active 정리
 -- 대상: 탑인더스트리(1188117437), 탑정보통신(1188119624) 취급 public_procurement_category와
 --       동일한 공공조달분류코드를 가진 시장 전체 계약 (두 회사 계약 포함)
--- 최종행 기준: is_final_contract_delivery_required='Y' + 최고 change_seq
+-- 최종행 기준: is_final_contract_delivery_required='Y' + 최고 change_seq (공사 동일 방식)
 -- TRUNCATE 사용 안 함. 펼쳐서 보기=flat, 합쳐서 보기=service_contract_grouped.
+-- 계약 1건 1행: 공동수급 여부 구분 없이 contract_delivery_integrated_no당 최고 change_seq 1건.
 --
 -- Step0: 두 회사의 public_procurement_category 목록 임시 저장 (JOIN으로 성능 확보)
 -- Step1: raw JOIN tmp_target_categories → flat UPSERT
---        (contract_delivery_integrated_no, vendor_biz_reg_no)당 최종 1건
+--        contract_delivery_integrated_no당 최종 1건 (max change_seq)
 -- Step2: flat(is_active='Y') → grouped UPSERT
---        group_key = COALESCE(initial_year_contract_no, contract_delivery_integrated_no) + vendor
--- Step3: raw에 더 이상 없는 (contract_no, vendor) → flat is_active='N'
--- Step4: flat(is_active='Y')에 더 이상 없는 group_key+vendor → grouped is_active='N'
+--        group_key = COALESCE(initial_year_contract_no, contract_delivery_integrated_no)
+-- Step3: raw에 더 이상 없는 contract_no → flat is_active='N'
+-- Step4: flat(is_active='Y')에 더 이상 없는 group_key → grouped is_active='N'
 --
 -- 권장 인덱스 (없으면 실행 전 생성):
 --   CREATE INDEX idx_vendor_final_svc ON service_contract_raw
@@ -45,8 +46,8 @@ BEGIN
     AND TRIM(public_procurement_category) <> '';
 
   -- ========== Step1: raw → flat UPSERT
-  -- (contract_delivery_integrated_no, vendor_biz_reg_no)당 최종 1건
-  -- 최종행: is_final_contract_delivery_required='Y' 중 change_seq DESC
+  -- contract_delivery_integrated_no당 최종 1건 (max change_seq, 공사와 동일 방식)
+  -- 공동수급 구분 없이 단순히 최고 change_seq 행을 사용
   -- LEFT JOIN flat → saved 값 보존 (신규는 'N', 기존은 유지)
   INSERT INTO service_contract_flat (
     contract_delivery_integrated_no,
@@ -75,8 +76,6 @@ BEGIN
     completion_date,
     first_contract_amount,
     contract_amount,
-    contract_share_pct,
-    contract_share_amount,
     latest_change_seq,
     saved,
     is_active,
@@ -96,7 +95,6 @@ BEGIN
     r.procurement_work_area,
     r.bid_notice_no,
     r.initial_year_contract_no,
-    -- 장기 판단: long_term_continuation_seq 값 있음 OR is_initial_long_term_contract='Y'
     CASE
       WHEN COALESCE(TRIM(r.long_term_continuation_seq), '') NOT IN ('', '0') THEN 'Y'
       WHEN r.is_initial_long_term_contract = 'Y' THEN 'Y'
@@ -109,22 +107,19 @@ BEGIN
     r.public_procurement_category,
     r.public_procurement_category_major,
     r.public_procurement_category_mid,
-    -- base_date / initial_base_date: VARCHAR YYYYMMDD → DATE
-    -- SUBSTRING_INDEX(..., '.', 1): '20151229.0' 같은 소수점 접미사 제거
     STR_TO_DATE(SUBSTRING_INDEX(SUBSTRING_INDEX(TRIM(r.initial_base_date), ' ', 1), '.', 1), '%Y%m%d'),
     STR_TO_DATE(SUBSTRING_INDEX(SUBSTRING_INDEX(TRIM(r.base_date),         ' ', 1), '.', 1), '%Y%m%d'),
     STR_TO_DATE(SUBSTRING_INDEX(SUBSTRING_INDEX(TRIM(r.start_date),        ' ', 1), '.', 1), '%Y%m%d'),
     STR_TO_DATE(SUBSTRING_INDEX(SUBSTRING_INDEX(TRIM(r.completion_date),   ' ', 1), '.', 1), '%Y%m%d'),
     r.first_contract_amount,
     r.contract_amount,
-    r.contract_share_pct,
-    r.contract_share_amount,
     r.contract_delivery_integrated_change_seq,
     COALESCE(f.saved, 'N'),
     'Y',
     v_run_date,
     NOW()
   FROM (
+    -- contract_delivery_integrated_no당 최고 change_seq 1건 선택
     SELECT
       sr.contract_delivery_integrated_no,
       sr.contract_delivery_integrated_change_seq,
@@ -154,11 +149,8 @@ BEGIN
       sr.completion_date,
       sr.first_contract_amount,
       sr.contract_amount,
-      sr.contract_share_pct,
-      sr.contract_share_amount,
-      -- 동일 (contract_no, vendor)에 is_final='Y'가 복수인 엣지케이스 대비
       ROW_NUMBER() OVER (
-        PARTITION BY sr.contract_delivery_integrated_no, sr.vendor_biz_reg_no
+        PARTITION BY sr.contract_delivery_integrated_no
         ORDER BY sr.contract_delivery_integrated_change_seq DESC
       ) AS rn
     FROM service_contract_raw sr
@@ -168,9 +160,9 @@ BEGIN
   ) r
   LEFT JOIN service_contract_flat f
     ON f.contract_delivery_integrated_no = r.contract_delivery_integrated_no
-   AND f.vendor_biz_reg_no               = r.vendor_biz_reg_no
   WHERE r.rn = 1
   ON DUPLICATE KEY UPDATE
+    vendor_biz_reg_no                = VALUES(vendor_biz_reg_no),
     vendor_name                      = VALUES(vendor_name),
     contract_title                   = VALUES(contract_title),
     demand_agency_code               = VALUES(demand_agency_code),
@@ -195,18 +187,15 @@ BEGIN
     completion_date                  = VALUES(completion_date),
     first_contract_amount            = VALUES(first_contract_amount),
     contract_amount                  = VALUES(contract_amount),
-    contract_share_pct               = VALUES(contract_share_pct),
-    contract_share_amount            = VALUES(contract_share_amount),
     latest_change_seq                = VALUES(latest_change_seq),
     is_active                        = 'Y',
     last_seen_date                   = v_run_date,
     etl_loaded_at                    = NOW();
 
   -- ========== Step2: flat → grouped UPSERT
-  -- group_key = COALESCE(NULLIF(TRIM(initial_year_contract_no),''), contract_delivery_integrated_no)
+  -- group_key = COALESCE(initial_year_contract_no, contract_delivery_integrated_no)
   -- 공사와 동일한 초년도계약번호 기반 장기계약 그룹 패턴
   -- 문자열 컬럼: 그룹 내 최초 계약(contract_date ASC) 기준 1행
-  -- is_long_term: contract_count > 1 OR 그룹 내 is_long_term='Y' 있으면 'Y'
   INSERT INTO service_contract_grouped (
     group_key,
     vendor_biz_reg_no,
@@ -232,7 +221,7 @@ BEGIN
   )
   SELECT
     g.group_key,
-    g.vendor_biz_reg_no,
+    MAX(CASE WHEN g.rn = 1 THEN g.vendor_biz_reg_no    END),
     MAX(CASE WHEN g.rn = 1 THEN g.vendor_name          END),
     MAX(CASE WHEN g.rn = 1 THEN g.contract_title       END),
     MAX(CASE WHEN g.rn = 1 THEN g.demand_agency_code   END),
@@ -269,27 +258,21 @@ BEGIN
       f.contract_amount,
       f.is_long_term,
       COALESCE(NULLIF(TRIM(f.initial_year_contract_no), ''), f.contract_delivery_integrated_no) AS group_key,
-      -- 그룹 내 최솟값 날짜: initial_contract_amount 계산용
       MIN(f.contract_date) OVER (
-        PARTITION BY
-          COALESCE(NULLIF(TRIM(f.initial_year_contract_no), ''), f.contract_delivery_integrated_no),
-          f.vendor_biz_reg_no
+        PARTITION BY COALESCE(NULLIF(TRIM(f.initial_year_contract_no), ''), f.contract_delivery_integrated_no)
       ) AS grp_min_date,
-      -- rn=1: 그룹 내 최초 계약 행 (문자열 대표값 추출용)
       ROW_NUMBER() OVER (
-        PARTITION BY
-          COALESCE(NULLIF(TRIM(f.initial_year_contract_no), ''), f.contract_delivery_integrated_no),
-          f.vendor_biz_reg_no
+        PARTITION BY COALESCE(NULLIF(TRIM(f.initial_year_contract_no), ''), f.contract_delivery_integrated_no)
         ORDER BY f.contract_date ASC, f.contract_delivery_integrated_no ASC
       ) AS rn
     FROM service_contract_flat f
     WHERE f.is_active = 'Y'
   ) g
   LEFT JOIN service_contract_grouped lg
-    ON lg.group_key       = g.group_key
-   AND lg.vendor_biz_reg_no = g.vendor_biz_reg_no
-  GROUP BY g.group_key, g.vendor_biz_reg_no
+    ON lg.group_key = g.group_key
+  GROUP BY g.group_key
   ON DUPLICATE KEY UPDATE
+    vendor_biz_reg_no         = VALUES(vendor_biz_reg_no),
     vendor_name               = VALUES(vendor_name),
     contract_title            = VALUES(contract_title),
     demand_agency_code        = VALUES(demand_agency_code),
@@ -309,7 +292,7 @@ BEGIN
     last_seen_date            = v_run_date,
     etl_loaded_at             = NOW();
 
-  -- ========== Step3: raw(필터 조건)에 더 이상 없는 (contract_no, vendor) → flat is_active='N'
+  -- ========== Step3: raw(필터 조건)에 더 이상 없는 contract_no → flat is_active='N'
   UPDATE service_contract_flat f
   SET f.is_active = 'N', f.etl_loaded_at = NOW()
   WHERE f.is_active = 'Y'
@@ -319,12 +302,10 @@ BEGIN
       JOIN tmp_target_categories tc
         ON tc.public_procurement_category = sr.public_procurement_category
       WHERE sr.contract_delivery_integrated_no = f.contract_delivery_integrated_no
-        AND sr.vendor_biz_reg_no               = f.vendor_biz_reg_no
         AND sr.is_final_contract_delivery_required = 'Y'
     );
 
-  -- ========== Step4: flat(is_active='Y')에 더 이상 없는 (group_key, vendor) → grouped is_active='N'
-  -- Step3 이후 실행해야 flat의 is_active 변경이 반영됨
+  -- ========== Step4: flat(is_active='Y')에 더 이상 없는 group_key → grouped is_active='N'
   UPDATE service_contract_grouped lg
   SET lg.is_active = 'N', lg.etl_loaded_at = NOW()
   WHERE lg.is_active = 'Y'
@@ -333,10 +314,8 @@ BEGIN
       FROM service_contract_flat f
       WHERE f.is_active = 'Y'
         AND COALESCE(NULLIF(TRIM(f.initial_year_contract_no), ''), f.contract_delivery_integrated_no) = lg.group_key
-        AND f.vendor_biz_reg_no = lg.vendor_biz_reg_no
     );
 
-  -- Step0 임시 테이블 정리
   DROP TEMPORARY TABLE IF EXISTS tmp_target_categories;
 
 END //

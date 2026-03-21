@@ -12,16 +12,18 @@
 
 탑인더스트리(사업자번호 1188117437), 탑정보통신(1188119624)이 체결한 용역 계약의 **공공조달분류코드와 동일한 분류를 가진 시장 전체 용역 계약**을 조회하는 화면이다. 시장 조사 목적이며, 두 회사의 계약도 포함된다.
 
+공동수급이어도 **계약별로 1건**으로 표시한다 (공사 데이터와 동일한 방식). 업체별 구분이나 공동수급 여부 식별은 하지 않는다.
+
 ---
 
 ## 1. 데이터 흐름 (백그라운드)
 
 - **원본**: `service_contract_raw` — CSV 적재용. 화면/API는 이 테이블을 직접 조회하지 않는다.
 - **조회용 테이블 2개** (ETL `sp_etl_service_contracts()` 로 채움):
-  - **`service_contract_flat`** — (contract_delivery_integrated_no, vendor_biz_reg_no)당 최종 1건. **펼쳐서 보기**용. 계약 단건 상세 조회.
-  - **`service_contract_grouped`** — flat을 초년도계약번호(group_key) + 업체 기준으로 묶어 집계한 결과. **합쳐서 보기**용. 장기계속계약은 그룹 1행(금액 합계), 비장기는 단건 1행, **같은 컬럼 구조**.
+  - **`service_contract_flat`** — 계약납품통합번호당 최종 **1건 1행**. **펼쳐서 보기**용. 공동수급이어도 대표업체(최대지분) 1행 + `is_joint_venture` 플래그.
+  - **`service_contract_grouped`** — flat을 초년도계약번호(group_key) 기준으로 묶어 집계한 결과. **합쳐서 보기**용. 장기계속계약은 그룹 1행(금액 합계), 비장기는 단건 1행.
 
-화면은 **토글 값에 따라** 둘 중 하나의 테이블만 조회하면 된다. raw를 직접 집계하지 말 것.
+- **공사와 동일한 구조**: 계약 1건 = 1행. 공동수급이어도 `contract_delivery_integrated_no`당 max change_seq 1행으로 저장. 업체별 구분 없음.
 
 ---
 
@@ -29,8 +31,8 @@
 
 | 화면 토글 | 사용 테이블 | 기간 필터 컬럼 | 비고 |
 |-----------|-------------|----------------|------|
-| **합쳐서 보기 ON** | `service_contract_grouped` | `initial_contract_date` | 장기=그룹 1행, 비장기=단건 1행, 동일 컬럼 |
-| **펼쳐서 보기 OFF** | `service_contract_flat` | `contract_date` | (계약납품통합번호, 업체사번) = 1행 |
+| **합쳐서 보기 ON** | `service_contract_grouped` | `initial_contract_date` | 장기=그룹 1행, 비장기=단건 1행 |
+| **펼쳐서 보기 OFF** | `service_contract_flat` | `contract_date` | 계약납품통합번호당 1행 |
 
 - 기간 조건: `[기간 필터 컬럼] BETWEEN :dateFrom AND :dateTo` (NULL이면 기간 미적용).
 - 조회 시 **is_active = 'Y'** 인 행만 사용.
@@ -43,9 +45,9 @@
 
 | DB 컬럼 | 타입 | 화면/API 용도 |
 |---------|------|----------------|
-| contract_delivery_integrated_no | VARCHAR(100) PK① | 계약납품통합번호 |
-| vendor_biz_reg_no | VARCHAR(50) PK② | 업체사업자등록번호 |
-| vendor_name | TEXT | 업체명 |
+| contract_delivery_integrated_no | VARCHAR(100) PK | 계약납품통합번호 |
+| vendor_biz_reg_no | VARCHAR(50) | 대표업체사업자등록번호 (공동수급 시 최대지분 업체) |
+| vendor_name | TEXT | 대표업체명 |
 | contract_title | TEXT | 계약명 |
 | demand_agency | TEXT | 수요기관명 |
 | demand_agency_region | VARCHAR(200) | 수요기관지역 |
@@ -68,8 +70,6 @@
 | completion_date | DATE | 완수일자 |
 | first_contract_amount | BIGINT | 최초계약금액 |
 | contract_amount | BIGINT | 계약금액 |
-| contract_share_pct | VARCHAR(20) | 계약지분율 (공동수급) |
-| contract_share_amount | BIGINT | 계약지분금액 (공동수급) |
 | latest_change_seq | BIGINT | 반영된 계약납품통합변경차수 |
 | saved | CHAR(1) | 저장 체크박스 (Y/N) |
 
@@ -77,8 +77,8 @@
 
 | DB 컬럼 | 타입 | 화면/API 용도 |
 |---------|------|----------------|
-| group_key | VARCHAR(100) PK① | COALESCE(초년도계약번호, 계약납품통합번호) |
-| vendor_biz_reg_no | VARCHAR(50) PK② | 업체사업자등록번호 |
+| group_key | VARCHAR(100) PK | COALESCE(초년도계약번호, 계약납품통합번호) |
+| vendor_biz_reg_no | VARCHAR(50) | 업체사업자등록번호 |
 | vendor_name | TEXT | 업체명 |
 | contract_title | TEXT | 계약명 (그룹 내 최초 계약 기준) |
 | demand_agency | TEXT | 수요기관명 |
@@ -106,8 +106,8 @@
   - 공통: `is_active = 'Y'` 조건 적용.
 
 - **저장(saved) 체크박스 갱신**
-  - `grouped=true`  → `service_contract_grouped` UPDATE — PK: **(group_key, vendor_biz_reg_no)** 복합키
-  - `grouped=false` → `service_contract_flat` UPDATE — PK: **(contract_delivery_integrated_no, vendor_biz_reg_no)** 복합키
+  - `grouped=true`  → `service_contract_grouped` UPDATE — PK: **group_key** 단일 컬럼
+  - `grouped=false` → `service_contract_flat` UPDATE — PK: **contract_delivery_integrated_no** 단일 컬럼
 
 - **엑셀/파일 다운로드**
   - 목록과 동일: 토글 ON이면 grouped, OFF이면 flat에서 같은 조건으로 조회한 결과를 그대로 다운로드.
@@ -124,24 +124,21 @@
    - 펼쳐서 보기: 반드시 `contract_date`
    토글에 따라 쿼리(또는 JPA 조건)를 반드시 분기할 것.
 
-3. **grouped PK는 복합키 2개**
-   `(group_key, vendor_biz_reg_no)`. saved 갱신 시 두 컬럼 모두 WHERE 조건으로 사용해야 한다.
-   - `group_key`는 장기계약이면 초년도계약번호, 비장기이면 계약납품통합번호 값이 들어간다.
+3. **PK는 단일 컬럼**
+   - flat: `contract_delivery_integrated_no` 단일 PK
+   - grouped: `group_key` 단일 PK
+   공사·물품과 동일한 단일 PK 구조이므로 saved 갱신 시 해당 컬럼 1개만 WHERE 조건으로 사용.
 
-4. **flat PK도 복합키 2개**
-   `(contract_delivery_integrated_no, vendor_biz_reg_no)`. 공동수급 계약의 경우 동일 계약납품통합번호에 업체별로 별도 행이 존재한다. saved 갱신 시 두 컬럼 모두 필요.
+4. **공동수급 처리 방식**
+   공동수급 계약이어도 `contract_delivery_integrated_no`당 max change_seq 행 1건만 저장한다 (공사와 동일). 업체별 구분이나 공동수급 식별 없음.
 
-5. **공동수급(joint venture) 특성**
-   용역 계약은 공동수급(분담이행/공동이행)이 있어 동일 계약납품통합번호에 여러 업체가 각각 1행씩 들어간다.
-   flat 조회 시 `contract_delivery_integrated_no`가 같은 행이 여러 개일 수 있으므로, 계약번호로 그룹핑할 때 `contract_share_pct`, `contract_share_amount`로 지분을 구분할 수 있다.
-
-6. **날짜·금액 타입**
+5. **날짜·금액 타입**
    DB는 DATE, BIGINT. API에서는 ISO 날짜 문자열, Long 또는 적절한 숫자 타입으로 매핑.
 
-7. **동일 화면 레이아웃 재사용**
+6. **동일 화면 레이아웃 재사용**
    합쳐서 보기에서도 "최초계약일자·최종계약일자·최종계약금액·계약건수" 컬럼을 grouped 컬럼(initial_contract_date, final_contract_date, final_contract_amount_sum, contract_count)에 매핑하면, 프론트는 토글만 바꿔도 같은 테이블/카드 UI를 재사용할 수 있다.
 
-8. **기존 공사·물품 화면과 동일 검색 조건**
+7. **기존 공사·물품 화면과 동일 검색 조건**
    화면의 검색 파라미터(기간, 업체명, 수요기관명, 장기여부 등)는 기존 공사·물품 조회 화면과 동일한 구조를 사용하면 된다.
    용역 화면에서 추가로 유용한 필터:
    - `procurement_work_area` (일반용역 / 기술용역 구분)
@@ -155,10 +152,10 @@
 - [ ] 토글 ON  → `service_contract_grouped` 조회, 기간 필터 `initial_contract_date`
 - [ ] 토글 OFF → `service_contract_flat` 조회, 기간 필터 `contract_date`
 - [ ] 목록·다운로드 모두 위 규칙 동일 적용
-- [ ] saved 갱신 — grouped: (group_key, vendor_biz_reg_no) 2개 컬럼 UPDATE
-- [ ] saved 갱신 — flat: (contract_delivery_integrated_no, vendor_biz_reg_no) 2개 컬럼 UPDATE
+- [ ] saved 갱신 — grouped: `group_key` 단일 컬럼 UPDATE
+- [ ] saved 갱신 — flat: `contract_delivery_integrated_no` 단일 컬럼 UPDATE
 - [ ] is_active = 'Y' 조건 적용
-- [ ] 공동수급 케이스: flat에서 동일 계약번호에 업체별 복수 행 존재 가능 — contract_share_pct/contract_share_amount 참고
+- [ ] 공동수급 포함 모든 계약: 계약 단위 1건 1행 (공사와 동일, 업체별 구분 없음)
 - [ ] 응답 DTO는 두 테이블 컬럼을 위 표 기준으로 매핑 (공통 DTO + flat/grouped 전용 필드 분리 고려)
 
 ---

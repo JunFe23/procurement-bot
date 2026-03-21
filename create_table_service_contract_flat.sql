@@ -1,7 +1,6 @@
 -- 용역 계약 단건(펼쳐서 보기)용 조회 테이블
 -- 탑인더스트리(1188117437), 탑정보통신(1188119624) 취급 public_procurement_category 기준 시장 전체 대상
--- PK: (contract_delivery_integrated_no, vendor_biz_reg_no)
---   → 공동수급 시 동일 계약에 업체별 1행. 최종행: is_final_contract_delivery_required='Y' + 최고 change_seq
+-- PK: contract_delivery_integrated_no (계약 1건당 1행 — 공동수급 구분 없이 max change_seq 1행, 공사 동일 방식)
 -- 기간 필터 기준 컬럼: contract_date (base_date → DATE 변환)
 -- 갱신: sp_etl_service_contracts() UPSERT + is_active 소프트 삭제 (TRUNCATE 없음)
 
@@ -11,10 +10,10 @@ CREATE TABLE IF NOT EXISTS service_contract_flat (
 
   -- ===== PK =====
   contract_delivery_integrated_no  VARCHAR(100) NOT NULL COMMENT '계약납품통합번호',
-  vendor_biz_reg_no                VARCHAR(50)  NOT NULL COMMENT '계약업체사업자등록번호',
 
   -- ===== 계약 정보 =====
-  vendor_name                      TEXT         DEFAULT NULL COMMENT '계약업체명',
+  vendor_biz_reg_no                VARCHAR(50)  DEFAULT NULL COMMENT '대표업체사업자등록번호 (공동수급 시 최대지분 업체)',
+  vendor_name                      TEXT         DEFAULT NULL COMMENT '대표업체명',
   contract_title                   TEXT         DEFAULT NULL COMMENT '계약명',
   demand_agency_code               VARCHAR(50)  DEFAULT NULL COMMENT '수요기관코드 (숫자코드)',
   demand_agency                    TEXT         DEFAULT NULL COMMENT '수요기관명칭',
@@ -36,8 +35,6 @@ CREATE TABLE IF NOT EXISTS service_contract_flat (
   public_procurement_category_mid  VARCHAR(100) DEFAULT NULL COMMENT '중분류공공조달분류',
 
   -- ===== 날짜 =====
-  -- contract_date  : base_date(VARCHAR YYYYMMDD) → DATE (기간 필터 기준)
-  -- first_contract_date: initial_base_date(VARCHAR YYYYMMDD) → DATE
   first_contract_date              DATE         DEFAULT NULL COMMENT '최초기준일자(initial_base_date→DATE)',
   contract_date                    DATE         DEFAULT NULL COMMENT '기준일자(base_date→DATE, 기간 필터)',
   start_date                       DATE         DEFAULT NULL COMMENT '착수일자',
@@ -46,8 +43,6 @@ CREATE TABLE IF NOT EXISTS service_contract_flat (
   -- ===== 금액 =====
   first_contract_amount            BIGINT       DEFAULT NULL COMMENT '최초계약금액',
   contract_amount                  BIGINT       DEFAULT NULL COMMENT '계약금액',
-  contract_share_pct               VARCHAR(20)  DEFAULT NULL COMMENT '계약지분율(공동수급)',
-  contract_share_amount            BIGINT       DEFAULT NULL COMMENT '계약지분금액(공동수급)',
 
   -- ===== ETL 관리 =====
   latest_change_seq                BIGINT       DEFAULT NULL COMMENT '반영된 계약납품통합변경차수',
@@ -56,7 +51,7 @@ CREATE TABLE IF NOT EXISTS service_contract_flat (
   last_seen_date                   DATE         DEFAULT NULL COMMENT 'ETL에서 마지막으로 확인한 날짜',
   etl_loaded_at                    DATETIME     DEFAULT NULL COMMENT 'ETL 적재/갱신 시각',
 
-  PRIMARY KEY (contract_delivery_integrated_no, vendor_biz_reg_no),
+  PRIMARY KEY (contract_delivery_integrated_no),
   KEY idx_contract_date               (contract_date),
   KEY idx_first_contract_date         (first_contract_date),
   KEY idx_vendor                      (vendor_biz_reg_no),
@@ -68,4 +63,4 @@ CREATE TABLE IF NOT EXISTS service_contract_flat (
   KEY idx_is_active                   (is_active)
 
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci
-  COMMENT='용역 계약 단건(펼쳐서 보기). 탑인더스트리/탑정보통신 취급 공공조달분류 기준 시장 전체. PK=(계약납품통합번호,업체). 기간필터=contract_date';
+  COMMENT='용역 계약 단건(펼쳐서 보기). PK=계약납품통합번호(1건 1행). 공동수급 구분 없이 max change_seq 1행(공사 동일). 기간필터=contract_date';
