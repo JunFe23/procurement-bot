@@ -41,6 +41,11 @@
    - 탑인더스트리·탑정보통신 취급 품목(물품분류번호+세부품명번호 쌍) 기준 시장 전체 계약 적재
    - raw → flat `(contract_no, item_seq)` / grouped `(bid_notice_no, vendor, contract_no)` UPSERT
    - `sp_etl_procurement_contracts()` 한 번 호출로 flat·grouped 동시 갱신
+7. **용역 계약 ETL 파이프라인 (시장 조사용):**
+   - 탑인더스트리·탑정보통신 취급 공공조달분류 기준 시장 전체 용역 계약 적재
+   - raw → flat `(contract_delivery_integrated_no)` / grouped `(group_key)` UPSERT
+   - 공동수급이어도 계약별 1건 처리 (max change_seq, 공사와 동일 방식)
+   - `sp_etl_service_contracts()` 한 번 호출로 flat·grouped 동시 갱신
 
 ---
 
@@ -164,7 +169,49 @@ python service_upload.py --downloads-dir ./downloads_service --completed-dir ./c
 - **테이블 자동 생성**: `service_contract_raw` 없으면 스크립트 실행 시 생성
 - 파일 인코딩: UTF-16 탭 구분, 헤더 72번째 줄
 - 로그 테이블: `service_ingestion_log`
-- PK: `(계약납품통합번호, 계약납품통합변경차수, 계약업체사업자등록번호)` — 공동수급 시 업체별 1행
+- PK: `(계약납품통합번호, 계약납품통합변경차수, 계약업체사업자등록번호, 업종)` — 공동수급 시 업체·업종별 1행
+
+#### 용역 테이블 구조 (raw → ETL → 조회용)
+
+```
+CSV (downloads_service/)
+    → service_upload.py
+    → service_contract_raw (원본)
+
+service_contract_raw (탑인더스트리·탑정보통신 취급 공공조달분류 기준)
+    → sp_etl_service_contracts()
+    ├── service_contract_flat       (펼쳐서 보기 / 단건 조회)
+    └── service_contract_grouped    (합쳐서 보기: 장기=그룹 1행·비장기=단건 1행)
+```
+
+| 테이블 | 역할 | PK / 기간 필터 |
+|--------|------|----------------|
+| `service_contract_raw` | CSV 원본 | `(contract_delivery_integrated_no, change_seq, vendor_biz_reg_no, business_type)` |
+| `service_contract_flat` | **펼쳐서 보기** (단건) | `contract_delivery_integrated_no` / `contract_date` |
+| `service_contract_grouped` | **합쳐서 보기** (장기=그룹·비장기=단건) | `group_key` / `initial_contract_date` |
+
+**화면 토글별 조회:**
+
+| 토글 | 조회 테이블 | 기간 필터 컬럼 |
+|------|-------------|----------------|
+| 합쳐서 보기 ON | `service_contract_grouped` | `initial_contract_date` |
+| 펼쳐서 보기 OFF | `service_contract_flat` | `contract_date` |
+
+**갱신 방식:** TRUNCATE 없이 `sp_etl_service_contracts()` 한 번으로 flat UPSERT → grouped UPSERT → `is_active` 정리. 공동수급이어도 `contract_delivery_integrated_no`당 max change_seq 1행으로 저장 (공사와 동일 방식).
+
+**대상 범위:** 탑인더스트리(1188117437)·탑정보통신(1188119624)이 체결한 `public_procurement_category`와 동일한 분류를 가진 시장 전체 용역 계약 (두 회사 계약 포함).
+
+#### 용역 ETL 최초 실행 순서 (1회)
+
+1. `create_table_service_contract_flat.sql`
+2. `create_table_service_contract_grouped.sql`
+3. `create_procedure_etl_service_contracts.sql`
+
+#### ETL 실행 (수동 또는 스케줄/스프링)
+
+```sql
+CALL sp_etl_service_contracts();
+```
 
 ---
 
@@ -272,6 +319,17 @@ CALL sp_refresh_procurement_contract_summary();
 | `alter_table_construction_contract_summary_*.sql` | summary ALTER DDL |
 | `alter_table_construction_contract_grouped_add_is_long_term.sql` | grouped 장기계약 컬럼 추가 |
 
+### 용역 계약 (service_contract_*)
+| 파일 | 설명 |
+|------|------|
+| `create_table_service_contract_flat.sql` | flat 테이블 DDL (펼쳐서 보기, 계약 단위) |
+| `create_table_service_contract_grouped.sql` | grouped 테이블 DDL (합쳐서 보기, 장기=그룹 1행) |
+| `create_procedure_etl_service_contracts.sql` | ETL 프로시저 (flat + grouped UPSERT, 시장 조사용) |
+| `alter_table_service_contract_raw_add_comments.sql` | raw 테이블 컬럼 코멘트 |
+| `alter_table_service_contract_raw_split_code_name.sql` | raw 코드/명칭 컬럼 분리 |
+| `alter_table_service_contract_flat_split_code_name.sql` | flat 코드/명칭 컬럼 분리 |
+| `alter_table_service_contract_grouped_split_code_name.sql` | grouped 코드/명칭 컬럼 분리 |
+
 ### 특정품목
 | 파일 | 설명 |
 |------|------|
@@ -294,6 +352,8 @@ CALL sp_refresh_procurement_contract_summary();
 | `docs/CONSTR_raw_columns_mapping.md` | raw 컬럼 매핑표·ETL 실행 가이드·주의사항 |
 | `docs/Spring_공사_조회_연동_프롬프트.md` | 공사 Spring Boot 조회 API 연동용 설계 프롬프트 |
 | `docs/Spring_물품_조회_연동_프롬프트.md` | 물품 Spring Boot 조회 API 연동용 설계 프롬프트 (시장 조사) |
+| `docs/Spring_용역_조회_연동_프롬프트.md` | 용역 Spring Boot 조회 API 연동용 설계 프롬프트 |
+| `docs/service_contract_classification.tsv` | 용역 공공조달분류 대/중/소분류별 계약 건수 분류표 |
 | `setup-ec2.md` | EC2 서버 수동 설정 가이드 |
 
 ---
@@ -337,6 +397,11 @@ crontab -e
 - ✅ 공사 ETL v2: `sp_etl_construction_contracts()` — TRUNCATE 없이 flat + grouped UPSERT, `is_active` 소프트 삭제
 - ✅ `construction_contract_grouped` 테이블 추가 — 합쳐서 보기용 (장기=그룹 1행·비장기=단건 1행)
 - ✅ `construction_contract_flat` 테이블 추가 — 펼쳐서 보기용 (contract_no당 최종 1건)
+- ✅ 용역 ETL 신규: `sp_etl_service_contracts()` — 탑인더스트리·탑정보통신 취급 공공조달분류 기준 시장 전체 flat + grouped UPSERT
+- ✅ `service_contract_flat` 테이블 추가 — 펼쳐서 보기용 (계약별 1건, max change_seq 기준, 공사와 동일 방식)
+- ✅ `service_contract_grouped` 테이블 추가 — 합쳐서 보기용 (장기=그룹 1행·비장기=단건 1행)
+- ✅ `docs/Spring_용역_조회_연동_프롬프트.md` 추가 — Spring Boot 용역 조회 API 연동 설계
+- ✅ `docs/service_contract_classification.tsv` 추가 — 용역 분류별 계약 건수 분류표
 - ✅ 용역 계약(`service_upload.py`, `service_contract_raw`) 데이터 파이프라인 추가
 - ✅ Headless 모드 자동 활성화 (EC2/Linux 환경 지원)
 - ✅ 자동 설치 스크립트 제공 (`setup-ec2.sh`) 및 상세 EC2 설정 가이드 (`setup-ec2.md`)
