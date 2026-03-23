@@ -1,11 +1,14 @@
 -- 용역 계약 ETL: raw → flat UPSERT → grouped UPSERT → flat/grouped is_active 정리
--- 대상: 탑인더스트리(1188117437), 탑정보통신(1188119624) 취급 public_procurement_category와
---       동일한 공공조달분류코드를 가진 시장 전체 계약 (두 회사 계약 포함)
+-- 대상: 아래 고정 소분류(public_procurement_category) 13종에 해당하는 시장 전체 계약
+--   기술용역 > 설계: 토목·건축·상하수도·전기·교통·정보통신 설계용역
+--   기술용역 > 감리: 건축·토목·전기·정보통신 감리용역
+--   기술용역 > CM:   건축·토목 CM용역
+--   기술용역 > 기타: 기타기술용역
 -- 최종행 기준: is_final_contract_delivery_required='Y' + 최고 change_seq (공사 동일 방식)
 -- TRUNCATE 사용 안 함. 펼쳐서 보기=flat, 합쳐서 보기=service_contract_grouped.
 -- 계약 1건 1행: 공동수급 여부 구분 없이 contract_delivery_integrated_no당 최고 change_seq 1건.
 --
--- Step0: 두 회사의 public_procurement_category 목록 임시 저장 (JOIN으로 성능 확보)
+-- Step0: 대상 소분류 13종 임시 테이블에 고정 저장 (JOIN으로 성능 확보)
 -- Step1: raw JOIN tmp_target_categories → flat UPSERT
 --        contract_delivery_integrated_no당 최종 1건 (max change_seq)
 -- Step2: flat(is_active='Y') → grouped UPSERT
@@ -14,10 +17,8 @@
 -- Step4: flat(is_active='Y')에 더 이상 없는 group_key → grouped is_active='N'
 --
 -- 권장 인덱스 (없으면 실행 전 생성):
---   CREATE INDEX idx_vendor_final_svc ON service_contract_raw
---     (vendor_biz_reg_no, is_final_contract_delivery_required, public_procurement_category);
---   CREATE INDEX idx_final_type_svc ON service_contract_raw
---     (is_final_contract_delivery_required, contract_type, public_procurement_category);
+--   CREATE INDEX idx_final_category_svc ON service_contract_raw
+--     (is_final_contract_delivery_required, public_procurement_category);
 
 USE g2b;
 
@@ -29,21 +30,32 @@ CREATE PROCEDURE sp_etl_service_contracts()
 BEGIN
   DECLARE v_run_date DATE DEFAULT CURDATE();
 
-  -- ========== Step0: 타깃 public_procurement_category 목록 임시 저장
-  -- 탑인더스트리/탑정보통신이 is_final_contract_delivery_required='Y'로 체결한 분류 코드 기준
+  -- ========== Step0: 대상 소분류 13종 고정 저장
+  -- public_procurement_category 는 소분류명을 직접 저장하는 컬럼
   DROP TEMPORARY TABLE IF EXISTS tmp_target_categories;
   CREATE TEMPORARY TABLE tmp_target_categories (
-    public_procurement_category VARCHAR(50) NOT NULL,
+    public_procurement_category VARCHAR(100) NOT NULL,
     PRIMARY KEY (public_procurement_category)
   ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 
-  INSERT IGNORE INTO tmp_target_categories (public_procurement_category)
-  SELECT DISTINCT public_procurement_category
-  FROM service_contract_raw
-  WHERE vendor_biz_reg_no IN ('1188117437', '1188119624')
-    AND is_final_contract_delivery_required = 'Y'
-    AND public_procurement_category IS NOT NULL
-    AND TRIM(public_procurement_category) <> '';
+  INSERT IGNORE INTO tmp_target_categories (public_procurement_category) VALUES
+    -- 기술용역 > 설계
+    ('토목설계용역'),
+    ('건축설계용역'),
+    ('상하수도설계용역'),
+    ('전기설계용역'),
+    ('교통설계용역'),
+    ('정보통신설계용역'),
+    -- 기술용역 > 감리
+    ('건축감리용역'),
+    ('토목감리용역'),
+    ('전기감리용역'),
+    ('정보통신감리용역'),
+    -- 기술용역 > CM
+    ('건축CM용역'),
+    ('토목CM용역'),
+    -- 기술용역 > 기타
+    ('기타기술용역');
 
   -- ========== Step1: raw → flat UPSERT
   -- contract_delivery_integrated_no당 최종 1건 (max change_seq, 공사와 동일 방식)
