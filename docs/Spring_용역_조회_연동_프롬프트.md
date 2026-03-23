@@ -27,7 +27,7 @@
 
 - **원본**: `service_contract_raw` — CSV 적재용. 화면/API는 이 테이블을 직접 조회하지 않는다.
 - **조회용 테이블 2개** (ETL `sp_etl_service_contracts()` 로 채움):
-  - **`service_contract_flat`** — 계약납품통합번호당 최종 **1건 1행**. **펼쳐서 보기**용. 공동수급이어도 대표업체(최대지분) 1행 + `is_joint_venture` 플래그.
+  - **`service_contract_flat`** — 계약납품통합번호당 최종 **1건 1행**. **펼쳐서 보기**용. 공동수급이어도 max change_seq 1행으로 통합.
   - **`service_contract_grouped`** — flat을 초년도계약번호(group_key) 기준으로 묶어 집계한 결과. **합쳐서 보기**용. 장기계속계약은 그룹 1행(금액 합계), 비장기는 단건 1행.
 
 - **공사와 동일한 구조**: 계약 1건 = 1행. 공동수급이어도 `contract_delivery_integrated_no`당 max change_seq 1행으로 저장. 업체별 구분 없음.
@@ -53,8 +53,8 @@
 | DB 컬럼 | 타입 | 화면/API 용도 |
 |---------|------|----------------|
 | contract_delivery_integrated_no | VARCHAR(100) PK | 계약납품통합번호 |
-| vendor_biz_reg_no | VARCHAR(50) | 대표업체사업자등록번호 (공동수급 시 최대지분 업체) |
-| vendor_name | TEXT | 대표업체명 |
+| vendor_biz_reg_no | VARCHAR(50) | 업체사업자등록번호 |
+| vendor_name | TEXT | 업체명 |
 | contract_title | TEXT | 계약명 |
 | demand_agency | TEXT | 수요기관명 |
 | demand_agency_region | VARCHAR(200) | 수요기관지역 |
@@ -64,13 +64,13 @@
 | bid_notice_no | VARCHAR(50) | 입찰공고번호 |
 | initial_year_contract_no | VARCHAR(100) | 초년도계약번호 (장기 그룹 키) |
 | is_long_term | CHAR(1) | 장기계속여부 Y/N |
-| representative_item_category_code | VARCHAR(50) | 대표물품분류코드 |
-| representative_item_category | VARCHAR(200) | 대표물품분류명 |
-| detail_item_code | VARCHAR(50) | 세부품명코드 |
-| detail_item_name | VARCHAR(200) | 세부품명 |
-| public_procurement_category | VARCHAR(50) | 공공조달분류코드 |
-| public_procurement_category_major | VARCHAR(100) | 대분류 공공조달분류 |
-| public_procurement_category_mid | VARCHAR(100) | 중분류 공공조달분류 |
+| representative_item_category_code | VARCHAR(50) | 대표물품분류코드 (용역은 보통 NULL) |
+| representative_item_category | VARCHAR(200) | 대표물품분류명 (용역은 보통 NULL) |
+| detail_item_code | VARCHAR(50) | 세부품명코드 (용역은 보통 NULL) |
+| detail_item_name | VARCHAR(200) | 세부품명 (용역은 보통 NULL) |
+| public_procurement_category | VARCHAR(50) | **소분류명** (e.g. 토목설계용역) — 소분류 필터 기준 컬럼 |
+| public_procurement_category_major | VARCHAR(100) | 대분류명 (현재 모두 '기술용역') |
+| public_procurement_category_mid | VARCHAR(100) | 중분류명 (설계/감리/CM/기타) — 중분류 필터 기준 컬럼 |
 | first_contract_date | DATE | 최초기준일자 |
 | contract_date | DATE | 기준일자 (기간 필터) |
 | start_date | DATE | 착수일자 |
@@ -92,8 +92,8 @@
 | demand_agency_region | VARCHAR(200) | 수요기관지역 |
 | contract_method | VARCHAR(50) | 계약방법 |
 | procurement_work_area | VARCHAR(50) | 조달업무영역 |
-| detail_item_code | VARCHAR(50) | 세부품명코드 |
-| detail_item_name | VARCHAR(200) | 세부품명 (최초 계약 기준) |
+| detail_item_code | VARCHAR(50) | 세부품명코드 (용역은 보통 NULL) |
+| detail_item_name | VARCHAR(200) | 세부품명 (용역은 보통 NULL) |
 | initial_contract_date | DATE | 그룹 최초 계약일 (기간 필터) |
 | initial_contract_amount | BIGINT | 그룹 최초 계약금액 |
 | final_contract_date | DATE | 그룹 최종 계약일 |
@@ -137,7 +137,7 @@
    공사·물품과 동일한 단일 PK 구조이므로 saved 갱신 시 해당 컬럼 1개만 WHERE 조건으로 사용.
 
 4. **공동수급 처리 방식**
-   공동수급 계약이어도 `contract_delivery_integrated_no`당 max change_seq 행 1건만 저장한다 (공사와 동일). 업체별 구분이나 공동수급 식별 없음.
+   공동수급 계약이어도 `contract_delivery_integrated_no`당 max change_seq 행 1건만 저장한다 (공사와 동일). 업체별 구분이나 공동수급 식별 없음. **is_joint_venture 컬럼은 존재하지 않는다.**
 
 5. **날짜·금액 타입**
    DB는 DATE, BIGINT. API에서는 ISO 날짜 문자열, Long 또는 적절한 숫자 타입으로 매핑.
@@ -145,12 +145,12 @@
 6. **동일 화면 레이아웃 재사용**
    합쳐서 보기에서도 "최초계약일자·최종계약일자·최종계약금액·계약건수" 컬럼을 grouped 컬럼(initial_contract_date, final_contract_date, final_contract_amount_sum, contract_count)에 매핑하면, 프론트는 토글만 바꿔도 같은 테이블/카드 UI를 재사용할 수 있다.
 
-7. **기존 공사·물품 화면과 동일 검색 조건**
-   화면의 검색 파라미터(기간, 업체명, 수요기관명, 장기여부 등)는 기존 공사·물품 조회 화면과 동일한 구조를 사용하면 된다.
-   용역 화면에서 추가로 유용한 필터:
-   - `procurement_work_area` (일반용역 / 기술용역 구분)
-   - `detail_item_name` (세부품명 검색)
-   - `public_procurement_category_major` (대분류 공공조달분류)
+7. **용역 전용 추가 필터 (권장)**
+   - `public_procurement_category_mid` (중분류: 설계 / 감리 / CM / 기타) — 드롭다운 필터
+   - `public_procurement_category` (소분류: 토목설계용역 등 13종) — 드롭다운 필터
+   - `is_long_term` (장기계속 여부 Y/N)
+   - `vendor_name` (업체명 검색)
+   - `demand_agency` (수요기관명 검색)
 
 ---
 
@@ -162,7 +162,7 @@
 - [ ] saved 갱신 — grouped: `group_key` 단일 컬럼 UPDATE
 - [ ] saved 갱신 — flat: `contract_delivery_integrated_no` 단일 컬럼 UPDATE
 - [ ] is_active = 'Y' 조건 적용
-- [ ] 공동수급 포함 모든 계약: 계약 단위 1건 1행 (공사와 동일, 업체별 구분 없음)
+- [ ] 공동수급 포함 모든 계약: 계약 단위 1건 1행 (공사와 동일, 업체별 구분 없음, is_joint_venture 컬럼 없음)
 - [ ] 응답 DTO는 두 테이블 컬럼을 위 표 기준으로 매핑 (공통 DTO + flat/grouped 전용 필드 분리 고려)
 
 ---
