@@ -24,6 +24,8 @@ CREATE TABLE IF NOT EXISTS service_contract_grouped (
   procurement_work_area            VARCHAR(50)  DEFAULT NULL COMMENT '조달업무영역',
   detail_item_code                 VARCHAR(50)  DEFAULT NULL COMMENT '세부품명코드 (숫자코드)',
   detail_item_name                 VARCHAR(200) DEFAULT NULL COMMENT '세부품명명칭 (최초 계약 기준)',
+  public_procurement_category      VARCHAR(50)  DEFAULT NULL COMMENT '소분류명 (e.g. 토목설계용역) — 소분류 필터 기준',
+  public_procurement_category_mid  VARCHAR(100) DEFAULT NULL COMMENT '중분류명 (설계/감리/CM/기타) — 중분류 필터 기준',
 
   -- ===== 집계 =====
   initial_contract_date            DATE         DEFAULT NULL COMMENT '그룹 최초 계약일(기간 필터)',
@@ -43,9 +45,11 @@ CREATE TABLE IF NOT EXISTS service_contract_grouped (
   KEY idx_initial_contract_date (initial_contract_date),
   KEY idx_final_contract_date   (final_contract_date),
   KEY idx_vendor                (vendor_biz_reg_no),
-  KEY idx_is_long_term          (is_long_term),
-  KEY idx_saved                 (saved),
-  KEY idx_is_active             (is_active)
+  KEY idx_is_long_term                (is_long_term),
+  KEY idx_public_procurement_category (public_procurement_category),
+  KEY idx_public_procurement_mid      (public_procurement_category_mid),
+  KEY idx_saved                       (saved),
+  KEY idx_is_active                   (is_active)
 
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci
   COMMENT='용역 계약 합쳐서 보기(장기 그룹 단위). PK=group_key(1건 1행). 공동수급 구분 없이 계약 단위(공사 동일). 기간필터=initial_contract_date';
