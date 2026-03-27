@@ -46,6 +46,10 @@
    - raw → flat `(contract_delivery_integrated_no)` / grouped `(group_key)` UPSERT
    - 공동수급이어도 계약별 1건 처리 (max change_seq, 공사와 동일 방식)
    - `sp_etl_service_contracts()` 한 번 호출로 flat·grouped 동시 갱신
+8. **쇼핑몰(3자단가) ETL 파이프라인:**
+   - `procurement_specific_item_raw`에서 `contract_type = '제3자단가계약'`만 필터하여 적재
+   - raw → `shopping_mall_flat` (조회 화면용) → `shopping_mall_summary` (대시보드 집계용)
+   - 대시보드에서 물품 계약과 UNION ALL로 통합 조회 가능 (`dataSource=all/procurement/shopping_mall`)
 
 ---
 
@@ -330,6 +334,14 @@ CALL sp_refresh_procurement_contract_summary();
 | `alter_table_service_contract_flat_split_code_name.sql` | flat 코드/명칭 컬럼 분리 |
 | `alter_table_service_contract_grouped_split_code_name.sql` | grouped 코드/명칭 컬럼 분리 |
 
+### 쇼핑몰(3자단가) (shopping_mall_*)
+| 파일 | 설명 |
+|------|------|
+| `create_table_shopping_mall_flat.sql` | flat 테이블 DDL (납품요구 조회용) |
+| `create_table_shopping_mall_summary.sql` | summary 테이블 DDL (대시보드 집계용) |
+| `create_procedure_etl_shopping_mall.sql` | ETL 프로시저 (specific_item_raw → flat, 제3자단가 필터) |
+| `create_procedure_refresh_shopping_mall_summary.sql` | summary 갱신 프로시저 (flat → summary) |
+
 ### 특정품목
 | 파일 | 설명 |
 |------|------|
@@ -354,6 +366,7 @@ CALL sp_refresh_procurement_contract_summary();
 | `docs/Spring_물품_조회_연동_프롬프트.md` | 물품 Spring Boot 조회 API 연동용 설계 프롬프트 (시장 조사) |
 | `docs/Spring_용역_조회_연동_프롬프트.md` | 용역 Spring Boot 조회 API 연동용 설계 프롬프트 |
 | `docs/service_contract_classification.tsv` | 용역 공공조달분류 대/중/소분류별 계약 건수 분류표 |
+| `docs/Spring_쇼핑몰_조회_대시보드_연동_프롬프트.md` | 쇼핑몰 Spring Boot 조회 API + 대시보드 연동 설계 프롬프트 |
 | `setup-ec2.md` | EC2 서버 수동 설정 가이드 |
 
 ---
@@ -403,5 +416,10 @@ crontab -e
 - ✅ `docs/Spring_용역_조회_연동_프롬프트.md` 추가 — Spring Boot 용역 조회 API 연동 설계
 - ✅ `docs/service_contract_classification.tsv` 추가 — 용역 분류별 계약 건수 분류표
 - ✅ 용역 계약(`service_upload.py`, `service_contract_raw`) 데이터 파이프라인 추가
+- ✅ 쇼핑몰(3자단가) ETL 신규: `sp_etl_shopping_mall()` — procurement_specific_item_raw 제3자단가계약 필터 → shopping_mall_flat UPSERT
+- ✅ `shopping_mall_flat` 테이블 추가 — 쇼핑몰 납품요구 조회용 (delivery_contract_no+change_seq+item_seq 단위)
+- ✅ `shopping_mall_summary` 테이블 추가 — 대시보드 집계용 (업체+물품분류+세부품명+연월 단위)
+- ✅ `sp_refresh_shopping_mall_summary()` 추가 — flat → summary 갱신 프로시저
+- ✅ `docs/Spring_쇼핑몰_조회_대시보드_연동_프롬프트.md` 추가 — 쇼핑몰 조회 API + 대시보드 dataSource 통합 설계
 - ✅ Headless 모드 자동 활성화 (EC2/Linux 환경 지원)
 - ✅ 자동 설치 스크립트 제공 (`setup-ec2.sh`) 및 상세 EC2 설정 가이드 (`setup-ec2.md`)
