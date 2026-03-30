@@ -24,5 +24,5 @@ CREATE TABLE IF NOT EXISTS procurement_contract_summary (
   KEY idx_is_long_term (is_long_term),
   KEY idx_first_contract_date (first_contract_date),
   KEY idx_final_contract_date (final_contract_date)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci
   COMMENT='procurement_raw 집계 결과 (매일 갱신)';

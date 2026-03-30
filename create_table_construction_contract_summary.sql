@@ -27,5 +27,5 @@ CREATE TABLE IF NOT EXISTS construction_contract_summary (
   KEY idx_initial_year_contract_no (initial_year_contract_no),
   KEY idx_is_long_term_contract (is_long_term_contract),
   KEY idx_saved (saved)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci
   COMMENT='공사 계약 요약 (시설공사·최종계약, contract_no당 최신 1건)';

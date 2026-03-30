@@ -34,5 +34,5 @@ CREATE TABLE IF NOT EXISTS construction_contract_flat (
   KEY idx_saved (saved),
   KEY idx_is_active (is_active),
   KEY idx_vendor_biz_reg_no (vendor_biz_reg_no)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci
   COMMENT='공사 단건 조회(펼쳐서 보기). 시설공사, contract_no당 최종 1건. 기간필터=contract_date';

@@ -50,5 +50,5 @@ CREATE TABLE IF NOT EXISTS construction_contract_raw (
   award_amount                     BIGINT        DEFAULT NULL COMMENT '낙찰금액',
   PRIMARY KEY (contract_no, contract_change_seq),
   KEY idx_vendor_biz_reg_no (vendor_biz_reg_no)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci
   COMMENT='공사 계약 내역 CSV 적재 (2017~2025 등)';

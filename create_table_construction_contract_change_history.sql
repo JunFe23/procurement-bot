@@ -28,5 +28,5 @@ CREATE TABLE IF NOT EXISTS construction_contract_change_history (
     FOREIGN KEY (contract_no) REFERENCES construction_contract_summary (contract_no) ON DELETE RESTRICT ON UPDATE CASCADE,
   KEY idx_history_contract_date (contract_date),
   KEY idx_history_final (is_final_contract)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci
   COMMENT='공사 계약 변경 이력(contract_no+change_seq, FK→summary)';

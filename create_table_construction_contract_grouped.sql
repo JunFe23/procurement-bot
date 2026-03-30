@@ -32,5 +32,5 @@ CREATE TABLE IF NOT EXISTS construction_contract_grouped (
   KEY idx_is_long_term_contract (is_long_term_contract),
   KEY idx_saved (saved),
   KEY idx_is_active (is_active)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci
   COMMENT='공사 합쳐서 보기. 시설공사 전체(장기=그룹1행, 비장기=단건1행). 기간필터=initial_contract_date';
