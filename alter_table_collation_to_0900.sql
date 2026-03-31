@@ -8,8 +8,9 @@ USE g2b;
 ALTER TABLE procurement_contract_summary
   CONVERT TO CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci;
 
-ALTER TABLE construction_contract_raw
-  CONVERT TO CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci;
+-- construction_contract_raw: RDS에 미존재, 로컬 전용 테이블
+-- ALTER TABLE construction_contract_raw
+--   CONVERT TO CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci;
 
 ALTER TABLE construction_contract_flat
   CONVERT TO CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci;
@@ -17,5 +18,4 @@ ALTER TABLE construction_contract_flat
 ALTER TABLE construction_contract_grouped
   CONVERT TO CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci;
 
-ALTER TABLE construction_contract_change_history
-  CONVERT TO CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci;
+-- construction_contract_change_history 는 미사용으로 제거됨
